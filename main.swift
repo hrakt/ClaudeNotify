@@ -451,8 +451,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var sessions: [SessionInfo] = []
 
         for file in files {
-            guard let heartbeat = try? file.resourceValues(
-                forKeys: [.contentModificationDateKey]).contentModificationDate else { continue }
+            let values = try? file.resourceValues(
+                forKeys: [.contentModificationDateKey, .creationDateKey])
+            guard let heartbeat = values?.contentModificationDate else { continue }
 
             guard heartbeat > cutoff else {
                 try? fm.removeItem(at: file)
@@ -463,7 +464,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let cwd = (try? String(contentsOf: file, encoding: .utf8))?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            var title = "Untitled session"
+            // A session with no transcript yet has not been typed into, so the
+            // only facts available are where it started and when.
+            var title = "New session, \(startedLabel(values?.creationDate ?? heartbeat))"
             var project = (cwd?.isEmpty == false) ? URL(fileURLWithPath: cwd!).lastPathComponent : ""
 
             if let transcript = transcriptURL(for: id) {
@@ -536,6 +539,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else { return nil }
         return URL(fileURLWithPath: path)
+    }
+
+    func startedLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter.string(from: date)
     }
 
     func relativeAge(_ date: Date) -> String {
