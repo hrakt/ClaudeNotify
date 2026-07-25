@@ -56,6 +56,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var toggleItem: NSMenuItem!
     var preview: NSSound?
 
+    // Kept off the status item until a right-click asks for it, so a plain left
+    // click can toggle mute instead of opening a menu.
+    let mainMenu = NSMenu()
+
     var isMuted: Bool { FileManager.default.fileExists(atPath: flagURL.path) }
 
     var selectedSound: URL {
@@ -71,14 +75,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         installSupportFiles()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.toolTip = "Claude Code completion sound"
+        mainMenu.delegate = self
 
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem.menu = menu
+        if let button = statusItem.button {
+            button.target = self
+            button.action = #selector(statusItemClicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
 
         rebuildMenu()
         updateUI()
+    }
+
+    @objc func statusItemClicked() {
+        guard let event = NSApp.currentEvent else {
+            toggle()
+            return
+        }
+
+        let wantsMenu = event.type == .rightMouseUp
+            || event.modifierFlags.contains(.control)
+            || event.modifierFlags.contains(.option)
+
+        if wantsMenu {
+            showMenu()
+        } else {
+            toggle()
+        }
+    }
+
+    func showMenu() {
+        rebuildMenu()
+        updateUI()
+        statusItem.menu = mainMenu
+        statusItem.button?.performClick(nil)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        statusItem.menu = nil
     }
 
     func installSupportFiles() {
@@ -108,7 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func rebuildMenu() {
-        guard let menu = statusItem.menu else { return }
+        let menu = mainMenu
         menu.removeAllItems()
 
         toggleItem = NSMenuItem(title: "Mute completion sound",
@@ -369,7 +403,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusItem.button?.title = muted ? "🔕" : "🔔"
         }
         toggleItem?.state = muted ? .on : .off
-        statusItem.button?.toolTip = desc
+        statusItem.button?.toolTip = "\(desc)\nClick to toggle, right-click for sounds and settings"
     }
 
     @objc func quit() { NSApp.terminate(nil) }

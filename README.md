@@ -56,7 +56,15 @@ To check your setup without waiting on Claude, run the script directly:
 
 ## Using it
 
-- **Mute completion sound** toggles the flag file. The bell icon reflects state (`bell.fill` on, `bell.slash.fill` muted).
+**Click** the bell to mute or unmute instantly. The icon shows which state you're in: `bell.fill` when the sound is on, `bell.slash.fill` (a bell with a slash through it) when muted.
+
+**Right-click** the bell for everything else. Control-click and Option-click work too, for trackpads set up without a right button.
+
+Double-click is deliberately not used: detecting one would mean delaying every mute toggle by a quarter second to see whether a second click is coming, which makes the common action feel broken to serve the rare one.
+
+The menu holds:
+
+- **Mute completion sound** toggles the same flag as clicking the icon, and shows a check when muted.
 - **Sound** lists every sound on the machine, with the current one check-marked. Picking one previews it immediately.
   - The 14 familiar system sounds (Glass, Ping, Hero…) sit at the top level.
   - **Alert Tones** holds 19 more that macOS ships but never exposes in System Settings: Droplet, Portal, Milestone, Cheers, Rebound, Handoff, Welcome, and the tapback sounds.
