@@ -15,6 +15,7 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/sound       one line: absolute path to the chosen sound
 ~/.claude/claudenotify/volume      one line: playback volume, 0.1 to 1.0
 ~/.claude/claudenotify/sounds/     sounds you've added
+~/.claude/claudenotify/sessions/   one file per session id, holding its sound
 ```
 
 When a turn ends, `notify.sh` checks the mute flag and exits if it's there. Otherwise it reads the chosen sound and volume, plays it with `afplay -v`, and posts a "Claude is done" banner. Every read is defensive: an unset, empty, or stale sound falls back to `Glass.aiff`, and a volume that isn't a bare number falls back to `1`. A bad state degrades to a working ding rather than to silence or a shell error.
@@ -73,10 +74,19 @@ The menu holds:
   - Anything you've imported appears below those.
 - **Sound → Add Sound…** copies audio files (aiff, wav, mp3, m4a, caf, aac) into `~/.claude/claudenotify/sounds/` and selects the last one added. Name collisions get numbered rather than overwriting.
 - **Sound → Reveal Sounds Folder** opens that folder in Finder, for adding or deleting files by hand.
+- **Sessions** lists your recent Claude Code sessions by name, so you can tell parallel work apart by ear. Open a session's submenu and choose **Use Current Sound** to give it the sound you currently have selected, or **Clear Assignment** to send it back to the default. A check mark means that session has its own sound.
 - **Volume** is a slider from 10% to 100%. The percentage above it updates as you drag, and releasing the slider plays the current sound at the new level so you can hear what you picked. It applies to both the in-app preview and the real notification.
 - **Play Test Sound** plays the current selection at the current volume.
 
 The menu rebuilds each time you open it, so files you add or delete in Finder show up without restarting the app.
+
+### How sessions are found
+
+Claude Code writes a transcript per session at `~/.claude/projects/<project>/<session-id>.jsonl`, and the app reads three things from it: the session id from the filename, a human-readable name from the last `aiTitle` entry, and the project from the last `cwd` entry.
+
+Two caveats worth knowing. **Liveness is a guess.** Nothing on the system reports which sessions are running (Claude Code doesn't even hold the transcript file open), so the app treats "written to in the last 8 hours" as active and shows at most 8, newest first. A session you left idle all morning may not appear, and a finished one may still linger. **Titles lag slightly**, since `aiTitle` is only written once Claude has enough context to name the session.
+
+Transcripts can reach tens of megabytes, so the app reads only the last 200KB of each rather than parsing the file. That keeps opening the menu at a few milliseconds instead of seconds.
 
 ## Stack
 

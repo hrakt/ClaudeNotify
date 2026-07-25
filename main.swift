@@ -9,6 +9,15 @@ let flagURL = FileManager.default.homeDirectoryForCurrentUser
 let supportDir = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent(".claude/claudenotify")
 let soundsDir = supportDir.appendingPathComponent("sounds")
+let sessionSoundsDir = supportDir.appendingPathComponent("sessions")
+let transcriptsDir = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent(".claude/projects")
+
+// Claude Code never reports which sessions are running, so recent transcript
+// writes stand in for liveness. Old transcripts pile up (108 here, 5 of them
+// from the last day), hence the window and the cap.
+let sessionWindow: TimeInterval = 8 * 60 * 60
+let sessionLimit = 8
 let soundPointerURL = supportDir.appendingPathComponent("sound")
 let volumePointerURL = supportDir.appendingPathComponent("volume")
 let scriptURL = supportDir.appendingPathComponent("notify.sh")
@@ -47,6 +56,27 @@ if [ -f "$POINTER" ]; then
     fi
 fi
 
+PAYLOAD=""
+if [ ! -t 0 ]; then
+    PAYLOAD="$(cat)"
+fi
+
+SESSION_ID="${PAYLOAD##*\\"session_id\\":\\"}"
+SESSION_ID="${SESSION_ID%%\\"*}"
+case "$SESSION_ID" in
+    ''|*[!0-9a-fA-F-]*) SESSION_ID="" ;;
+esac
+
+if [ -n "$SESSION_ID" ]; then
+    SESSION_SOUND="$HOME/.claude/claudenotify/sessions/$SESSION_ID"
+    if [ -f "$SESSION_SOUND" ]; then
+        CHOSEN_SESSION="$(cat "$SESSION_SOUND")"
+        if [ -n "$CHOSEN_SESSION" ] && [ -f "$CHOSEN_SESSION" ]; then
+            SOUND="$CHOSEN_SESSION"
+        fi
+    fi
+fi
+
 VOLUME="1"
 VOLUME_POINTER="$HOME/.claude/claudenotify/volume"
 if [ -f "$VOLUME_POINTER" ]; then
@@ -61,6 +91,13 @@ afplay -v "$VOLUME" "$SOUND" 2>/dev/null
 osascript -e 'display notification "Claude is done" with title "Claude Code"' 2>/dev/null || true
 
 """
+
+struct SessionInfo {
+    let id: String
+    let title: String
+    let project: String
+    let modified: Date
+}
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem!
@@ -139,6 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func installSupportFiles() {
         let fm = FileManager.default
         try? fm.createDirectory(at: soundsDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: sessionSoundsDir, withIntermediateDirectories: true)
 
         let existing = try? String(contentsOf: scriptURL, encoding: .utf8)
         if existing != scriptBody {
@@ -215,6 +253,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             keyEquivalent: "")
         nameItem.isEnabled = false
         menu.addItem(nameItem)
+
+        let sessionsParent = NSMenuItem(title: "Sessions", action: nil, keyEquivalent: "")
+        sessionsParent.submenu = sessionsMenu()
+        menu.addItem(sessionsParent)
 
         menu.addItem(.separator())
 
@@ -325,6 +367,164 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.representedObject = url
         item.state = url.resolvingSymlinksInPath().path == current ? .on : .off
         return item
+    }
+
+    // Transcripts reach tens of megabytes, so the title is read from the tail
+    // rather than by parsing the file.
+    func tailText(of url: URL, bytes: UInt64 = 200_000) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        try? handle.seek(toOffset: size > bytes ? size - bytes : 0)
+        guard let data = try? handle.readToEnd() else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    func lastJSONValue(_ key: String, in text: String) -> String? {
+        let needle = "\"\(key)\":\""
+        guard let found = text.range(of: needle, options: .backwards) else { return nil }
+        let rest = text[found.upperBound...]
+        guard let end = rest.firstIndex(of: "\"") else { return nil }
+        let value = String(rest[..<end])
+        return value.isEmpty ? nil : value.replacingOccurrences(of: "\\\"", with: "\"")
+    }
+
+    func recentSessions() -> [SessionInfo] {
+        let fm = FileManager.default
+        guard let projectDirs = try? fm.contentsOfDirectory(
+            at: transcriptsDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]) else { return [] }
+
+        let cutoff = Date().addingTimeInterval(-sessionWindow)
+        var candidates: [(url: URL, modified: Date)] = []
+
+        for directory in projectDirs {
+            let files = (try? fm.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles])) ?? []
+            for file in files where file.pathExtension == "jsonl" {
+                guard let modified = try? file.resourceValues(
+                    forKeys: [.contentModificationDateKey]).contentModificationDate,
+                      modified > cutoff else { continue }
+                candidates.append((file, modified))
+            }
+        }
+
+        return candidates
+            .sorted { $0.modified > $1.modified }
+            .prefix(sessionLimit)
+            .map { candidate in
+                let text = tailText(of: candidate.url) ?? ""
+                let id = candidate.url.deletingPathExtension().lastPathComponent
+                let title = lastJSONValue("aiTitle", in: text) ?? "Untitled session"
+                let cwd = lastJSONValue("cwd", in: text)
+                let project = cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
+                    ?? candidate.url.deletingLastPathComponent().lastPathComponent
+                return SessionInfo(id: id, title: title, project: project, modified: candidate.modified)
+            }
+    }
+
+    func assignedSound(for sessionID: String) -> URL? {
+        let pointer = sessionSoundsDir.appendingPathComponent(sessionID)
+        guard let raw = try? String(contentsOf: pointer, encoding: .utf8) else { return nil }
+        let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
+    func relativeAge(_ date: Date) -> String {
+        let seconds = Int(Date().timeIntervalSince(date))
+        if seconds < 60 { return "just now" }
+        if seconds < 3600 { return "\(seconds / 60)m ago" }
+        return "\(seconds / 3600)h ago"
+    }
+
+    func sessionsMenu() -> NSMenu {
+        let menu = NSMenu()
+        let sessions = recentSessions()
+
+        guard !sessions.isEmpty else {
+            let empty = NSMenuItem(title: "No sessions in the last 8 hours", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+            return menu
+        }
+
+        for session in sessions {
+            let assigned = assignedSound(for: session.id)
+            var title = "\(session.project) · \(session.title)"
+            if title.count > 58 { title = String(title.prefix(57)) + "…" }
+
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.state = assigned == nil ? .off : .on
+
+            let submenu = NSMenu()
+
+            let status = NSMenuItem(
+                title: assigned.map { "Sound: \(prettyName($0.deletingPathExtension().lastPathComponent))" }
+                    ?? "Sound: default",
+                action: nil,
+                keyEquivalent: "")
+            status.isEnabled = false
+            submenu.addItem(status)
+
+            let age = NSMenuItem(title: "Active \(relativeAge(session.modified))", action: nil, keyEquivalent: "")
+            age.isEnabled = false
+            submenu.addItem(age)
+
+            submenu.addItem(.separator())
+
+            let assign = NSMenuItem(
+                title: "Use Current Sound (\(prettyName(selectedSound.deletingPathExtension().lastPathComponent)))",
+                action: #selector(assignSoundToSession(_:)),
+                keyEquivalent: "")
+            assign.target = self
+            assign.representedObject = session.id
+            submenu.addItem(assign)
+
+            if assigned != nil {
+                let clear = NSMenuItem(title: "Clear Assignment",
+                                       action: #selector(clearSessionSound(_:)),
+                                       keyEquivalent: "")
+                clear.target = self
+                clear.representedObject = session.id
+                submenu.addItem(clear)
+            }
+
+            let preview = NSMenuItem(title: "Play This Session's Sound",
+                                     action: #selector(playSessionSound(_:)),
+                                     keyEquivalent: "")
+            preview.target = self
+            preview.representedObject = session.id
+            submenu.addItem(preview)
+
+            item.submenu = submenu
+            menu.addItem(item)
+        }
+
+        return menu
+    }
+
+    @objc func assignSoundToSession(_ sender: NSMenuItem) {
+        guard let sessionID = sender.representedObject as? String else { return }
+        try? FileManager.default.createDirectory(at: sessionSoundsDir, withIntermediateDirectories: true)
+        try? selectedSound.path.write(
+            to: sessionSoundsDir.appendingPathComponent(sessionID),
+            atomically: true,
+            encoding: .utf8)
+        play(selectedSound)
+    }
+
+    @objc func clearSessionSound(_ sender: NSMenuItem) {
+        guard let sessionID = sender.representedObject as? String else { return }
+        try? FileManager.default.removeItem(at: sessionSoundsDir.appendingPathComponent(sessionID))
+    }
+
+    @objc func playSessionSound(_ sender: NSMenuItem) {
+        guard let sessionID = sender.representedObject as? String else { return }
+        play(assignedSound(for: sessionID) ?? selectedSound)
     }
 
     func volumeLabel(for volume: Double) -> String {
