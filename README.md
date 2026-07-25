@@ -1,6 +1,6 @@
 # ClaudeNotify
 
-A tiny macOS menu-bar app that controls how [Claude Code](https://claude.com/claude-code) notifies you when a turn finishes: mute it with one click, or pick which sound plays.
+A tiny macOS menu-bar app that controls how [Claude Code](https://claude.com/claude-code) notifies you when a turn finishes: mute it with one click, or pick from the 101 sounds already on your Mac.
 
 Claude Code can run a **Stop hook** when a turn ends. That's great, until you're heads-down and every response dings, or you get tired of hearing Glass. ClaudeNotify puts a bell in the menu bar so you can mute, unmute, and change the sound without editing any config.
 
@@ -57,7 +57,11 @@ To check your setup without waiting on Claude, run the script directly:
 ## Using it
 
 - **Mute completion sound** toggles the flag file. The bell icon reflects state (`bell.fill` on, `bell.slash.fill` muted).
-- **Sound** lists the 14 macOS system sounds plus anything you've added, with the current one check-marked. Picking one previews it immediately.
+- **Sound** lists every sound on the machine, with the current one check-marked. Picking one previews it immediately.
+  - The 14 familiar system sounds (Glass, Ping, Hero…) sit at the top level.
+  - **Alert Tones** holds 19 more that macOS ships but never exposes in System Settings: Droplet, Portal, Milestone, Cheers, Rebound, Handoff, Welcome, and the tapback sounds.
+  - **Interface Sounds** holds 68 more, grouped as macOS groups them: `siri`, `dock`, `finder`, `system`, `facetime`, `telephony`, `accessibility`, `ink`.
+  - Anything you've imported appears below those.
 - **Sound → Add Sound…** copies audio files (aiff, wav, mp3, m4a, caf, aac) into `~/.claude/claudenotify/sounds/` and selects the last one added. Name collisions get numbered rather than overwriting.
 - **Sound → Reveal Sounds Folder** opens that folder in Finder, for adding or deleting files by hand.
 - **Play Test Sound** plays the current selection.

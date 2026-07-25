@@ -16,6 +16,20 @@ let systemSoundsDir = URL(fileURLWithPath: "/System/Library/Sounds")
 let defaultSound = systemSoundsDir.appendingPathComponent("Glass.aiff")
 let audioExtensions: Set<String> = ["aiff", "aif", "wav", "mp3", "m4a", "caf", "aac"]
 
+// Sounds macOS ships but never surfaces in System Settings. Browsing them keeps
+// the app free of API keys, downloads and licence bookkeeping.
+// Alert tones sit four directories deep, so they are flattened into one list;
+// the interface sounds are already grouped into useful categories, so they keep
+// their folder structure.
+let extraSoundSources: [(title: String, url: URL, flatten: Bool)] = [
+    ("Alert Tones",
+     URL(fileURLWithPath: "/System/Library/PrivateFrameworks/ToneLibrary.framework"),
+     true),
+    ("Interface Sounds",
+     URL(fileURLWithPath: "/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds"),
+     false),
+]
+
 // The Stop hook runs this script, so every behavior change ships by rewriting it
 // here instead of by asking the user to re-edit ~/.claude/settings.json.
 let scriptBody = """
@@ -112,6 +126,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             soundMenu.addItem(soundItem(for: url, current: current))
         }
 
+        soundMenu.addItem(.separator())
+
+        for source in extraSoundSources {
+            let submenu = source.flatten
+                ? flatSoundMenu(for: source.url, current: current)
+                : buildSoundMenu(for: source.url, current: current)
+            guard !submenu.items.isEmpty else { continue }
+            let parent = NSMenuItem(title: source.title, action: nil, keyEquivalent: "")
+            parent.submenu = submenu
+            soundMenu.addItem(parent)
+        }
+
         let userSounds = soundList(in: soundsDir)
         if !userSounds.isEmpty {
             soundMenu.addItem(.separator())
@@ -129,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(soundParent)
 
         let nameItem = NSMenuItem(
-            title: "Current: \(selectedSound.deletingPathExtension().lastPathComponent)",
+            title: "Current: \(prettyName(selectedSound.deletingPathExtension().lastPathComponent))",
             action: nil,
             keyEquivalent: "")
         nameItem.isEnabled = false
@@ -146,8 +172,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(quitItem)
     }
 
+    func flatSoundMenu(for directory: URL, current: String) -> NSMenu {
+        let menu = NSMenu()
+        guard let walker = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]) else { return menu }
+
+        let files = walker
+            .compactMap { $0 as? URL }
+            .filter { audioExtensions.contains($0.pathExtension.lowercased()) }
+            .sorted { prettyName($0.lastPathComponent).localizedStandardCompare(prettyName($1.lastPathComponent)) == .orderedAscending }
+
+        for url in files {
+            menu.addItem(soundItem(for: url, current: current))
+        }
+        return menu
+    }
+
+    func buildSoundMenu(for directory: URL, current: String) -> NSMenu {
+        let menu = NSMenu()
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles])) ?? []
+
+        let sorted = entries.sorted {
+            $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+        }
+        let files = sorted.filter { audioExtensions.contains($0.pathExtension.lowercased()) }
+        let directories = sorted.filter {
+            (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        }
+
+        for url in files {
+            menu.addItem(soundItem(for: url, current: current))
+        }
+
+        var addedSeparator = files.isEmpty
+        for url in directories {
+            let submenu = buildSoundMenu(for: url, current: current)
+            guard !submenu.items.isEmpty else { continue }
+            if !addedSeparator {
+                menu.addItem(.separator())
+                addedSeparator = true
+            }
+            if submenu.items.count == 1, let only = submenu.items.first, only.representedObject != nil {
+                submenu.removeItem(only)
+                menu.addItem(only)
+                continue
+            }
+            let parent = NSMenuItem(title: prettyName(url.lastPathComponent),
+                                    action: nil,
+                                    keyEquivalent: "")
+            parent.submenu = submenu
+            menu.addItem(parent)
+        }
+
+        return menu
+    }
+
+    func prettyName(_ raw: String) -> String {
+        var name = raw.replacingOccurrences(of: "-EncoreInfinitum", with: "")
+        name = name.replacingOccurrences(of: "_", with: " ")
+        name = name.replacingOccurrences(of: "-", with: " ")
+
+        var spaced = ""
+        var previous: Character?
+        for character in name {
+            if let previous, character.isUppercase, previous.isLowercase || previous.isNumber {
+                spaced.append(" ")
+            }
+            spaced.append(character)
+            previous = character
+        }
+
+        name = spaced.trimmingCharacters(in: .whitespaces)
+        guard let first = name.first else { return raw }
+        return first.uppercased() + name.dropFirst()
+    }
+
     func soundItem(for url: URL, current: String) -> NSMenuItem {
-        let item = NSMenuItem(title: url.deletingPathExtension().lastPathComponent,
+        let item = NSMenuItem(title: prettyName(url.deletingPathExtension().lastPathComponent),
                               action: #selector(selectSound(_:)),
                               keyEquivalent: "")
         item.target = self
