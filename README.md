@@ -39,16 +39,29 @@ Launching the app creates `~/.claude/claudenotify/` and writes `notify.sh`. Then
     "Stop": [
       {
         "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/claudenotify/notify.sh"
-          }
+          { "type": "command", "command": "~/.claude/claudenotify/notify.sh" }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "~/.claude/claudenotify/notify.sh" }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "~/.claude/claudenotify/notify.sh" }
         ]
       }
     ]
   }
 }
 ```
+
+All three point at the same script, which branches on the `hook_event_name` in the payload. `Stop` is the one that makes noise; `SessionStart` and `SessionEnd` are silent and exist only to keep the session list accurate. `Stop` alone is enough if you don't care about per-session sounds.
 
 To check your setup without waiting on Claude, run the script directly:
 
@@ -84,7 +97,17 @@ The menu rebuilds each time you open it, so files you add or delete in Finder sh
 
 Claude Code writes a transcript per session at `~/.claude/projects/<project>/<session-id>.jsonl`, and the app reads three things from it: the session id from the filename, a human-readable name from the last `aiTitle` entry, and the project from the last `cwd` entry.
 
-Two caveats worth knowing. **Liveness is a guess.** Nothing on the system reports which sessions are running (Claude Code doesn't even hold the transcript file open), so the app treats "written to in the last 8 hours" as active and shows at most 8, newest first. A session you left idle all morning may not appear, and a finished one may still linger. **Titles lag slightly**, since `aiTitle` is only written once Claude has enough context to name the session.
+Which sessions are _live_ comes from a registry the script maintains at `~/.claude/claudenotify/live/`, one file per open session:
+
+- `SessionStart` creates the file, recording the session's working directory
+- `Stop` refreshes it, doubling as a heartbeat
+- `SessionEnd` deletes it, so quitting a session removes it from the menu immediately
+
+The registry is updated even while muted, since muting should silence the ding rather than hide which sessions exist.
+
+A session killed outright, by closing the terminal or `kill -9`, never sends `SessionEnd`, so entries with no heartbeat for 24 hours are pruned when the menu opens. Sessions that were already running before the hooks were registered have no entry until they next respond; while the registry is empty the app falls back to ranking transcripts by modification time, so the menu is never blank.
+
+**Titles lag slightly**, since `aiTitle` is only written once Claude has enough context to name the session.
 
 Transcripts can reach tens of megabytes, so the app reads only the last 200KB of each rather than parsing the file. That keeps opening the menu at a few milliseconds instead of seconds.
 
