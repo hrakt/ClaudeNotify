@@ -10,6 +10,7 @@ let supportDir = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent(".claude/claudenotify")
 let soundsDir = supportDir.appendingPathComponent("sounds")
 let soundPointerURL = supportDir.appendingPathComponent("sound")
+let volumePointerURL = supportDir.appendingPathComponent("volume")
 let scriptURL = supportDir.appendingPathComponent("notify.sh")
 
 let systemSoundsDir = URL(fileURLWithPath: "/System/Library/Sounds")
@@ -46,7 +47,17 @@ if [ -f "$POINTER" ]; then
     fi
 fi
 
-afplay "$SOUND" 2>/dev/null
+VOLUME="1"
+VOLUME_POINTER="$HOME/.claude/claudenotify/volume"
+if [ -f "$VOLUME_POINTER" ]; then
+    CHOSEN_VOLUME="$(cat "$VOLUME_POINTER")"
+    case "$CHOSEN_VOLUME" in
+        ''|*[!0-9.]*) ;;
+        *) VOLUME="$CHOSEN_VOLUME" ;;
+    esac
+fi
+
+afplay -v "$VOLUME" "$SOUND" 2>/dev/null
 osascript -e 'display notification "Claude is done" with title "Claude Code"' 2>/dev/null || true
 
 """
@@ -61,6 +72,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let mainMenu = NSMenu()
 
     var isMuted: Bool { FileManager.default.fileExists(atPath: flagURL.path) }
+
+    var volumeLabelItem: NSMenuItem?
+
+    var currentVolume: Double {
+        guard let raw = try? String(contentsOf: volumePointerURL, encoding: .utf8),
+              let value = Double(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return 1.0
+        }
+        return min(max(value, 0.1), 1.0)
+    }
 
     var selectedSound: URL {
         guard let raw = try? String(contentsOf: soundPointerURL, encoding: .utf8) else {
@@ -195,6 +216,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         nameItem.isEnabled = false
         menu.addItem(nameItem)
 
+        menu.addItem(.separator())
+
+        let label = NSMenuItem(title: volumeLabel(for: currentVolume), action: nil, keyEquivalent: "")
+        label.isEnabled = false
+        volumeLabelItem = label
+        menu.addItem(label)
+        menu.addItem(volumeSliderItem())
+
+        menu.addItem(.separator())
+
         menu.addItem(actionItem("Play Test Sound", #selector(playTestSound)))
 
         menu.addItem(.separator())
@@ -296,6 +327,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
+    func volumeLabel(for volume: Double) -> String {
+        "Volume: \(Int((volume * 100).rounded()))%"
+    }
+
+    func volumeSliderItem() -> NSMenuItem {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 26))
+        let slider = NSSlider(frame: NSRect(x: 20, y: 3, width: 182, height: 20))
+        slider.minValue = 0.1
+        slider.maxValue = 1.0
+        slider.doubleValue = currentVolume
+        slider.isContinuous = true
+        slider.target = self
+        slider.action = #selector(volumeChanged(_:))
+        container.addSubview(slider)
+
+        let item = NSMenuItem()
+        item.view = container
+        return item
+    }
+
+    @objc func volumeChanged(_ sender: NSSlider) {
+        let value = (sender.doubleValue * 100).rounded() / 100
+        try? String(format: "%.2f", value).write(to: volumePointerURL, atomically: true, encoding: .utf8)
+        volumeLabelItem?.title = volumeLabel(for: value)
+
+        if NSApp.currentEvent?.type == .leftMouseUp {
+            play(selectedSound)
+        }
+    }
+
     func actionItem(_ title: String, _ selector: Selector) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: selector, keyEquivalent: "")
         item.target = self
@@ -366,6 +427,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func play(_ url: URL) {
         preview?.stop()
         preview = NSSound(contentsOf: url, byReference: true)
+        preview?.volume = Float(currentVolume)
         preview?.play()
     }
 
