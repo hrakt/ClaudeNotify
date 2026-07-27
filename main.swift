@@ -25,6 +25,13 @@ let sessionWindow: TimeInterval = 8 * 60 * 60
 let sessionLimit = 8
 let soundPointerURL = supportDir.appendingPathComponent("sound")
 let volumePointerURL = supportDir.appendingPathComponent("volume")
+let mutedUntilURL = supportDir.appendingPathComponent("muted-until")
+let muteDurations: [(title: String, minutes: Int)] = [
+    ("15 Minutes", 15),
+    ("30 Minutes", 30),
+    ("1 Hour", 60),
+    ("Until I Turn It Back On", 0),
+]
 let scriptURL = supportDir.appendingPathComponent("notify.sh")
 
 let systemSoundsDir = URL(fileURLWithPath: "/System/Library/Sounds")
@@ -94,6 +101,22 @@ fi
 
 test -f "$HOME/.claude/notifications-muted" && exit 0
 
+# A timed mute expires on its own: once the deadline passes the file is removed
+# here, so sound returns even if the app is not running.
+MUTED_UNTIL_FILE="$HOME/.claude/claudenotify/muted-until"
+if [ -f "$MUTED_UNTIL_FILE" ]; then
+    MUTED_UNTIL="$(cat "$MUTED_UNTIL_FILE")"
+    case "$MUTED_UNTIL" in
+        ''|*[!0-9]*) rm -f "$MUTED_UNTIL_FILE" ;;
+        *)
+            if [ "$(date +%s)" -lt "$MUTED_UNTIL" ]; then
+                exit 0
+            fi
+            rm -f "$MUTED_UNTIL_FILE"
+            ;;
+    esac
+fi
+
 SOUND="/System/Library/Sounds/Glass.aiff"
 POINTER="$HOME/.claude/claudenotify/sound"
 if [ -f "$POINTER" ]; then
@@ -144,7 +167,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // click can toggle mute instead of opening a menu.
     let mainMenu = NSMenu()
 
-    var isMuted: Bool { FileManager.default.fileExists(atPath: flagURL.path) }
+    var isPermanentlyMuted: Bool { FileManager.default.fileExists(atPath: flagURL.path) }
+
+    // Expired deadlines are cleared on read so a stale file cannot keep the bell
+    // looking muted after the timer has run out.
+    var mutedUntil: Date? {
+        guard let raw = try? String(contentsOf: mutedUntilURL, encoding: .utf8),
+              let epoch = TimeInterval(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+        let deadline = Date(timeIntervalSince1970: epoch)
+        guard deadline > Date() else {
+            try? FileManager.default.removeItem(at: mutedUntilURL)
+            return nil
+        }
+        return deadline
+    }
+
+    var isMuted: Bool { isPermanentlyMuted || mutedUntil != nil }
 
     var volumeLabelItem: NSMenuItem?
 
@@ -179,6 +219,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         rebuildMenu()
         updateUI()
+
+        Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            self?.updateUI()
+        }
     }
 
     @objc func statusItemClicked() {
@@ -241,11 +285,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let menu = mainMenu
         menu.removeAllItems()
 
-        toggleItem = NSMenuItem(title: "Mute completion sound",
+        toggleItem = NSMenuItem(title: isMuted ? "Unmute completion sound" : "Mute completion sound",
                                 action: #selector(toggle),
                                 keyEquivalent: "m")
         toggleItem.target = self
         menu.addItem(toggleItem)
+
+        if let deadline = mutedUntil {
+            let remaining = NSMenuItem(title: "Silent for \(remainingLabel(until: deadline))",
+                                       action: nil,
+                                       keyEquivalent: "")
+            remaining.isEnabled = false
+            menu.addItem(remaining)
+        } else if !isPermanentlyMuted {
+            let muteFor = NSMenu()
+            for duration in muteDurations where duration.minutes > 0 {
+                let item = NSMenuItem(title: duration.title,
+                                      action: #selector(muteForDuration(_:)),
+                                      keyEquivalent: "")
+                item.target = self
+                item.representedObject = duration.minutes
+                muteFor.addItem(item)
+            }
+            let parent = NSMenuItem(title: "Mute For", action: nil, keyEquivalent: "")
+            parent.submenu = muteFor
+            menu.addItem(parent)
+        }
 
         menu.addItem(.separator())
 
@@ -754,9 +819,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.runModal()
     }
 
+    func remainingLabel(until deadline: Date) -> String {
+        let minutes = Int((deadline.timeIntervalSinceNow / 60).rounded(.up))
+        if minutes <= 1 { return "under a minute" }
+        if minutes < 60 { return "\(minutes) more minutes" }
+        let hours = minutes / 60
+        let rest = minutes % 60
+        if rest == 0 { return hours == 1 ? "1 more hour" : "\(hours) more hours" }
+        return "\(hours)h \(rest)m"
+    }
+
+    @objc func muteForDuration(_ sender: NSMenuItem) {
+        guard let minutes = sender.representedObject as? Int else { return }
+        let deadline = Date().addingTimeInterval(TimeInterval(minutes * 60))
+        try? String(format: "%.0f", deadline.timeIntervalSince1970)
+            .write(to: mutedUntilURL, atomically: true, encoding: .utf8)
+        updateUI()
+    }
+
+    // Either kind of mute is cleared by one toggle, so there is never a state
+    // where the bell looks unmuted but a forgotten timer is still running.
     @objc func toggle() {
         if isMuted {
             try? FileManager.default.removeItem(at: flagURL)
+            try? FileManager.default.removeItem(at: mutedUntilURL)
         } else {
             try? FileManager.default.createDirectory(
                 at: flagURL.deletingLastPathComponent(),
@@ -767,9 +853,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func updateUI() {
+        let deadline = mutedUntil
         let muted = isMuted
         let symbol = muted ? "bell.slash.fill" : "bell.fill"
-        let desc = muted ? "Claude completion sound muted" : "Claude completion sound on"
+        var desc = muted ? "Claude completion sound muted" : "Claude completion sound on"
+        if let deadline {
+            desc = "Claude completion sound muted, \(remainingLabel(until: deadline))"
+        }
         if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: desc) {
             img.isTemplate = true   // adapts to light/dark menu bar
             statusItem.button?.image = img
