@@ -17,6 +17,7 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/volume      one line: playback volume, 0.1 to 1.0
 ~/.claude/claudenotify/sounds/     sounds you've added
 ~/.claude/claudenotify/sessions/   one file per session id, holding its sound
+~/.claude/claudenotify/session-volumes/  per-session volume overrides
 ```
 
 When a turn ends, `notify.sh` checks the mute flag and exits if it's there. Otherwise it reads the chosen sound and volume, plays it with `afplay -v`, and posts a "Claude is done" banner. Every read is defensive: an unset, empty, or stale sound falls back to `Glass.aiff`, and a volume that isn't a bare number falls back to `1`. A bad state degrades to a working ding rather than to silence or a shell error.
@@ -89,7 +90,7 @@ The menu holds:
   - Anything you've imported appears below those.
 - **Sound → Add Sound…** copies audio files (aiff, wav, mp3, m4a, caf, aac) into `~/.claude/claudenotify/sounds/` and selects the last one added. Name collisions get numbered rather than overwriting.
 - **Sound → Reveal Sounds Folder** opens that folder in Finder, for adding or deleting files by hand.
-- **Sessions** lists your recent Claude Code sessions by name, so you can tell parallel work apart by ear. Open a session's submenu and choose **Use Current Sound** to give it the sound you currently have selected, or **Clear Assignment** to send it back to the default. A check mark means that session has its own sound.
+- **Sessions** lists your recent Claude Code sessions by name, so you can tell parallel work apart by ear. Open a session's submenu and choose **Use Current Sound** to give it the sound you currently have selected. Each session also gets its own **volume slider**, useful for turning a chatty background session down without losing the one you care about. A session with no override follows the global volume, and the submenu says which is in effect. **Clear Session Settings** drops both the sound and the volume override. A check mark on the session means it has its own sound.
 - **Volume** is a slider from 10% to 100%. The percentage above it updates as you drag, and releasing the slider plays the current sound at the new level so you can hear what you picked. It applies to both the in-app preview and the real notification.
 - **Play Test Sound** plays the current selection at the current volume.
 

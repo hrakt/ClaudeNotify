@@ -10,6 +10,7 @@ let supportDir = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent(".claude/claudenotify")
 let soundsDir = supportDir.appendingPathComponent("sounds")
 let sessionSoundsDir = supportDir.appendingPathComponent("sessions")
+let sessionVolumesDir = supportDir.appendingPathComponent("session-volumes")
 let liveDir = supportDir.appendingPathComponent("live")
 
 // SessionEnd removes a session from the registry, but a session killed outright
@@ -146,10 +147,25 @@ if [ -f "$VOLUME_POINTER" ]; then
     esac
 fi
 
+if [ -n "$SESSION_ID" ]; then
+    SESSION_VOLUME="$HOME/.claude/claudenotify/session-volumes/$SESSION_ID"
+    if [ -f "$SESSION_VOLUME" ]; then
+        CHOSEN_SESSION_VOLUME="$(cat "$SESSION_VOLUME")"
+        case "$CHOSEN_SESSION_VOLUME" in
+            ''|*[!0-9.]*) ;;
+            *) VOLUME="$CHOSEN_SESSION_VOLUME" ;;
+        esac
+    fi
+fi
+
 afplay -v "$VOLUME" "$SOUND" 2>/dev/null
 osascript -e 'display notification "Claude is done" with title "Claude Code"' 2>/dev/null || true
 
 """
+
+final class SessionVolumeSlider: NSSlider {
+    var sessionID: String = ""
+}
 
 struct SessionInfo {
     let id: String
@@ -257,6 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let fm = FileManager.default
         try? fm.createDirectory(at: soundsDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: sessionSoundsDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: sessionVolumesDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: liveDir, withIntermediateDirectories: true)
 
         let existing = try? String(contentsOf: scriptURL, encoding: .utf8)
@@ -649,11 +666,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             status.isEnabled = false
             submenu.addItem(status)
 
+            let sessionLevel = sessionVolume(for: session.id)
+            let volumeStatus = NSMenuItem(
+                title: sessionLevel.map { "Volume: \(Int(($0 * 100).rounded()))%" }
+                    ?? "Volume: default (\(Int((currentVolume * 100).rounded()))%)",
+                action: nil,
+                keyEquivalent: "")
+            volumeStatus.isEnabled = false
+            submenu.addItem(volumeStatus)
+
             let age = NSMenuItem(title: "Active \(relativeAge(session.modified))", action: nil, keyEquivalent: "")
             age.isEnabled = false
             submenu.addItem(age)
 
             submenu.addItem(.separator())
+
+            submenu.addItem(sessionVolumeItem(for: session.id, level: sessionLevel ?? currentVolume))
 
             let assign = NSMenuItem(
                 title: "Use Current Sound (\(prettyName(selectedSound.deletingPathExtension().lastPathComponent)))",
@@ -663,8 +691,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             assign.representedObject = session.id
             submenu.addItem(assign)
 
-            if assigned != nil {
-                let clear = NSMenuItem(title: "Clear Assignment",
+            if assigned != nil || sessionLevel != nil {
+                let clear = NSMenuItem(title: "Clear Session Settings",
                                        action: #selector(clearSessionSound(_:)),
                                        keyEquivalent: "")
                 clear.target = self
@@ -698,12 +726,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func clearSessionSound(_ sender: NSMenuItem) {
         guard let sessionID = sender.representedObject as? String else { return }
-        try? FileManager.default.removeItem(at: sessionSoundsDir.appendingPathComponent(sessionID))
+        let fm = FileManager.default
+        try? fm.removeItem(at: sessionSoundsDir.appendingPathComponent(sessionID))
+        try? fm.removeItem(at: sessionVolumesDir.appendingPathComponent(sessionID))
     }
 
     @objc func playSessionSound(_ sender: NSMenuItem) {
         guard let sessionID = sender.representedObject as? String else { return }
-        play(assignedSound(for: sessionID) ?? selectedSound)
+        play(assignedSound(for: sessionID) ?? selectedSound,
+             volume: sessionVolume(for: sessionID))
+    }
+
+    // A session with no override follows the global slider, so the absence of a
+    // file is meaningful and is not the same as storing the current level.
+    func sessionVolume(for sessionID: String) -> Double? {
+        let pointer = sessionVolumesDir.appendingPathComponent(sessionID)
+        guard let raw = try? String(contentsOf: pointer, encoding: .utf8),
+              let value = Double(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+        return min(max(value, 0.1), 1.0)
+    }
+
+    func sessionVolumeItem(for sessionID: String, level: Double) -> NSMenuItem {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 26))
+        let slider = SessionVolumeSlider(frame: NSRect(x: 20, y: 3, width: 182, height: 20))
+        slider.sessionID = sessionID
+        slider.minValue = 0.1
+        slider.maxValue = 1.0
+        slider.doubleValue = level
+        slider.isContinuous = true
+        slider.target = self
+        slider.action = #selector(sessionVolumeChanged(_:))
+        container.addSubview(slider)
+
+        let item = NSMenuItem()
+        item.view = container
+        return item
+    }
+
+    @objc func sessionVolumeChanged(_ sender: SessionVolumeSlider) {
+        let sessionID = sender.sessionID
+        guard !sessionID.isEmpty else { return }
+        let value = (sender.doubleValue * 100).rounded() / 100
+
+        try? FileManager.default.createDirectory(at: sessionVolumesDir, withIntermediateDirectories: true)
+        try? String(format: "%.2f", value).write(
+            to: sessionVolumesDir.appendingPathComponent(sessionID),
+            atomically: true,
+            encoding: .utf8)
+
+        if NSApp.currentEvent?.type == .leftMouseUp {
+            play(assignedSound(for: sessionID) ?? selectedSound, volume: value)
+        }
     }
 
     func volumeLabel(for volume: Double) -> String {
@@ -803,10 +878,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         play(selectedSound)
     }
 
-    func play(_ url: URL) {
+    func play(_ url: URL, volume: Double? = nil) {
         preview?.stop()
         preview = NSSound(contentsOf: url, byReference: true)
-        preview?.volume = Float(currentVolume)
+        preview?.volume = Float(volume ?? currentVolume)
         preview?.play()
     }
 
