@@ -1,5 +1,6 @@
 import Cocoa
 import UniformTypeIdentifiers
+import UserNotifications
 
 // The flag file the Claude Code Stop hook checks. If this file exists, the
 // completion sound is suppressed. Toggling the menu-bar item creates/removes it.
@@ -13,6 +14,13 @@ let sessionSoundsDir = supportDir.appendingPathComponent("sessions")
 let sessionVolumesDir = supportDir.appendingPathComponent("session-volumes")
 let speakDir = supportDir.appendingPathComponent("speak")
 let liveDir = supportDir.appendingPathComponent("live")
+
+// The hook cannot post a clickable notification itself: banners raised by
+// osascript belong to Script Editor and ignore clicks. So it drops a file here
+// and the app, which can handle a click, posts the banner.
+let pendingDir = supportDir.appendingPathComponent("pending")
+let notificationsBlockedURL = supportDir.appendingPathComponent("notifications-blocked")
+let warpBundleID = "dev.warp.Warp-Stable"
 
 // SessionEnd removes a session from the registry, but a session killed outright
 // never sends it, so a heartbeat this old is treated as dead.
@@ -161,20 +169,31 @@ fi
 
 afplay -v "$VOLUME" "$SOUND" 2>/dev/null
 
+# The session's own name says more than "Claude is done", so it is resolved
+# once here and reused by both the announcement and the banner.
+TRANSCRIPT="${PAYLOAD##*\\"transcript_path\\":\\"}"
+TRANSCRIPT="${TRANSCRIPT%%\\"*}"
+SESSION_TITLE=""
+case "$TRANSCRIPT" in
+    /*.jsonl)
+        if [ -f "$TRANSCRIPT" ]; then
+            SESSION_TITLE="$(tail -c 200000 "$TRANSCRIPT" | grep -o '"aiTitle":"[^"]*"' | tail -1 | cut -d'"' -f4)"
+        fi
+        ;;
+esac
+
+PROJECT="${CWD##*/}"
+SESSION_LABEL="$SESSION_TITLE"
+if [ -n "$PROJECT" ] && [ -n "$SESSION_TITLE" ]; then
+    SESSION_LABEL="$PROJECT: $SESSION_TITLE"
+elif [ -n "$PROJECT" ]; then
+    SESSION_LABEL="$PROJECT"
+fi
+
 # Speaking the session name is opt-in per session: hearing every session
-# announce itself all day is worse than a ding. The title comes from the
-# transcript the payload points at, so it is always current.
+# announce itself all day is worse than a ding.
 if [ -n "$SESSION_ID" ] && [ -f "$HOME/.claude/claudenotify/speak/$SESSION_ID" ]; then
-    TRANSCRIPT="${PAYLOAD##*\\"transcript_path\\":\\"}"
-    TRANSCRIPT="${TRANSCRIPT%%\\"*}"
-    SPOKEN=""
-    case "$TRANSCRIPT" in
-        /*.jsonl)
-            if [ -f "$TRANSCRIPT" ]; then
-                SPOKEN="$(tail -c 200000 "$TRANSCRIPT" | grep -o '"aiTitle":"[^"]*"' | tail -1 | cut -d'"' -f4)"
-            fi
-            ;;
-    esac
+    SPOKEN="$SESSION_TITLE"
     if [ -z "$SPOKEN" ]; then
         SPOKEN="Claude"
     fi
@@ -192,7 +211,18 @@ if [ -n "$SESSION_ID" ] && [ -f "$HOME/.claude/claudenotify/speak/$SESSION_ID" ]
     fi
 fi
 
-osascript -e 'display notification "Claude is done" with title "Claude Code"' 2>/dev/null || true
+# Preferred path: hand the banner to the app, which can name the session and
+# handle a click. The blocked marker exists when macOS refused the app
+# permission, in which case the plain banner is better than none.
+if [ -n "$SESSION_ID" ] \\
+    && [ ! -f "$HOME/.claude/claudenotify/notifications-blocked" ] \\
+    && pgrep -f "ClaudeNotify.app/Contents/MacOS/ClaudeNotify" >/dev/null 2>&1; then
+    mkdir -p "$HOME/.claude/claudenotify/pending" 2>/dev/null
+    printf '%s' "$SESSION_LABEL" > "$HOME/.claude/claudenotify/pending/$SESSION_ID"
+else
+    SAFE_LABEL="$(printf '%s' "${SESSION_LABEL:-Claude Code}" | tr -cd 'A-Za-z0-9 .,:_/#-')"
+    osascript -e "display notification \\"Finished\\" with title \\"Claude Code\\" subtitle \\"$SAFE_LABEL\\"" 2>/dev/null || true
+fi
 
 """
 
@@ -207,7 +237,7 @@ struct SessionInfo {
     let modified: Date
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
     var statusItem: NSStatusItem!
     var toggleItem: NSMenuItem!
     var preview: NSSound?
@@ -215,6 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // Kept off the status item until a right-click asks for it, so a plain left
     // click can toggle mute instead of opening a menu.
     let mainMenu = NSMenu()
+    var pendingWatcher: DispatchSourceFileSystemObject?
 
     var isPermanentlyMuted: Bool { FileManager.default.fileExists(atPath: flagURL.path) }
 
@@ -272,6 +303,123 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateUI()
         }
+
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert]) { [weak self] granted, error in
+            NSLog("ClaudeNotify: notification authorization granted=\(granted) error=\(error?.localizedDescription ?? "none")")
+            DispatchQueue.main.async { self?.recordNotificationPermission(granted) }
+        }
+        startWatchingPending()
+        drainPending()
+    }
+
+    func startWatchingPending() {
+        let descriptor = open(pendingDir.path, O_EVTONLY)
+        guard descriptor >= 0 else {
+            NSLog("ClaudeNotify: could not watch \(pendingDir.path)")
+            return
+        }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write],
+            queue: .main)
+        source.setEventHandler { [weak self] in self?.drainPending() }
+        source.setCancelHandler { close(descriptor) }
+        source.resume()
+        pendingWatcher = source
+    }
+
+    // The script reads this marker and falls back to its own plain banner, so a
+    // refusal by macOS costs the click and the styling, never the notification.
+    func recordNotificationPermission(_ granted: Bool) {
+        let fm = FileManager.default
+        if granted {
+            try? fm.removeItem(at: notificationsBlockedURL)
+        } else {
+            try? fm.createDirectory(at: supportDir, withIntermediateDirectories: true)
+            fm.createFile(atPath: notificationsBlockedURL.path, contents: nil)
+        }
+    }
+
+    func drainPending() {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: pendingDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]) else { return }
+
+        for file in files {
+            let sessionID = file.lastPathComponent
+            let label = (try? String(contentsOf: file, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            try? fm.removeItem(at: file)
+            postFinishedNotification(for: sessionID, label: label)
+        }
+    }
+
+    func describeSession(_ sessionID: String) -> String {
+        let cwd = (try? String(contentsOf: liveDir.appendingPathComponent(sessionID), encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var project = (cwd?.isEmpty == false) ? URL(fileURLWithPath: cwd!).lastPathComponent : ""
+        var title = ""
+
+        if let transcript = transcriptURL(for: sessionID) {
+            let text = tailText(of: transcript) ?? ""
+            title = lastJSONValue("aiTitle", in: text) ?? ""
+            if project.isEmpty, let recorded = lastJSONValue("cwd", in: text) {
+                project = URL(fileURLWithPath: recorded).lastPathComponent
+            }
+        }
+
+        if !project.isEmpty && !title.isEmpty { return "\(project) · \(title)" }
+        if !title.isEmpty { return title }
+        if !project.isEmpty { return project }
+        return "Claude Code"
+    }
+
+    func postFinishedNotification(for sessionID: String, label: String? = nil) {
+        let content = UNMutableNotificationContent()
+        let resolved = (label?.isEmpty == false) ? label! : describeSession(sessionID)
+        content.title = "Claude finished"
+        content.subtitle = resolved
+        content.body = "Click to switch to Warp."
+        content.userInfo = ["session": sessionID]
+
+        let request = UNNotificationRequest(
+            identifier: "\(sessionID)-\(Date().timeIntervalSince1970)",
+            content: content,
+            trigger: nil)
+
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                NSLog("ClaudeNotify: could not post notification: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        activateWarp()
+        completionHandler()
+    }
+
+    func activateWarp() {
+        if let running = NSRunningApplication.runningApplications(
+            withBundleIdentifier: warpBundleID).first {
+            running.activate(options: [.activateAllWindows])
+            return
+        }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: warpBundleID) {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        }
     }
 
     @objc func statusItemClicked() {
@@ -309,6 +457,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         try? fm.createDirectory(at: sessionVolumesDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: speakDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: liveDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: pendingDir, withIntermediateDirectories: true)
 
         let existing = try? String(contentsOf: scriptURL, encoding: .utf8)
         if existing != scriptBody {

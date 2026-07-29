@@ -19,9 +19,11 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/sessions/   one file per session id, holding its sound
 ~/.claude/claudenotify/session-volumes/  per-session volume overrides
 ~/.claude/claudenotify/speak/      marker per session that should announce its name
+~/.claude/claudenotify/pending/    banner handoff: script drops a session id, app posts it
+~/.claude/claudenotify/notifications-blocked  written when macOS refuses the app permission
 ```
 
-When a turn ends, `notify.sh` checks the mute flag and exits if it's there. Otherwise it reads the chosen sound and volume, plays it with `afplay -v`, and posts a "Claude is done" banner. Every read is defensive: an unset, empty, or stale sound falls back to `Glass.aiff`, and a volume that isn't a bare number falls back to `1`. A bad state degrades to a working ding rather than to silence or a shell error.
+When a turn ends, `notify.sh` checks the mute flag and exits if it's there. Otherwise it reads the chosen sound and volume, plays it with `afplay -v`, and posts a banner naming the session. Every read is defensive: an unset, empty, or stale sound falls back to `Glass.aiff`, and a volume that isn't a bare number falls back to `1`. A bad state degrades to a working ding rather than to silence or a shell error.
 
 Because the hook only ever names the script, new features ship by rewriting the script. You edit `settings.json` exactly once, at install.
 
@@ -122,6 +124,19 @@ With **Speak Session Name** ticked, the script reads the session's title from th
 Three things to expect. It is **opt-in per session**, because hearing every session announce itself all day is worse than a ding. A full title takes around **3.5 seconds** to speak against half a second for a chime, so it suits the one or two sessions you are actually waiting on. And if two speaking sessions finish at the same moment, a lock directory means one speaks and the other just dings, rather than both talking over each other; a lock older than two minutes is treated as stale and reclaimed.
 
 Ticket numbers are read as numbers, so `SMART-6177` comes out as "smart six thousand one hundred seventy seven". It identifies the ticket fine, and spelling digits out individually would mangle every other number in a title.
+
+### The completion banner
+
+The banner names the session that finished rather than saying "Claude is done", because with several sessions running the useful information is *which* one.
+
+There are two ways it can be posted, and the script picks automatically:
+
+1. **From the app.** The script drops the session id and label in `pending/`, the app notices within milliseconds and posts it. Only this route can be clicked (clicking brings Warp to the front), and only this route can be styled as a persistent alert in System Settings, because the notification belongs to ClaudeNotify.
+2. **From the script.** A plain `osascript` banner, titled `Claude Code` with the session name as the subtitle. Not clickable, since banners raised by `osascript` belong to Script Editor.
+
+Route 1 needs macOS to grant ClaudeNotify notification permission, which it refuses for an ad-hoc signed app. When the app is refused it writes `notifications-blocked`, and the script uses route 2 instead. So a refusal costs the click and the styling, never the notification itself. Delete that file if you later sign the app properly and want to retry.
+
+The label text is stripped to letters, digits and simple punctuation before being interpolated into the AppleScript, so a session title cannot inject commands.
 
 ## Stack
 
