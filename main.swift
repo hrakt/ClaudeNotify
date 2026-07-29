@@ -11,6 +11,7 @@ let supportDir = FileManager.default.homeDirectoryForCurrentUser
 let soundsDir = supportDir.appendingPathComponent("sounds")
 let sessionSoundsDir = supportDir.appendingPathComponent("sessions")
 let sessionVolumesDir = supportDir.appendingPathComponent("session-volumes")
+let speakDir = supportDir.appendingPathComponent("speak")
 let liveDir = supportDir.appendingPathComponent("live")
 
 // SessionEnd removes a session from the registry, but a session killed outright
@@ -159,6 +160,38 @@ if [ -n "$SESSION_ID" ]; then
 fi
 
 afplay -v "$VOLUME" "$SOUND" 2>/dev/null
+
+# Speaking the session name is opt-in per session: hearing every session
+# announce itself all day is worse than a ding. The title comes from the
+# transcript the payload points at, so it is always current.
+if [ -n "$SESSION_ID" ] && [ -f "$HOME/.claude/claudenotify/speak/$SESSION_ID" ]; then
+    TRANSCRIPT="${PAYLOAD##*\\"transcript_path\\":\\"}"
+    TRANSCRIPT="${TRANSCRIPT%%\\"*}"
+    SPOKEN=""
+    case "$TRANSCRIPT" in
+        /*.jsonl)
+            if [ -f "$TRANSCRIPT" ]; then
+                SPOKEN="$(tail -c 200000 "$TRANSCRIPT" | grep -o '"aiTitle":"[^"]*"' | tail -1 | cut -d'"' -f4)"
+            fi
+            ;;
+    esac
+    if [ -z "$SPOKEN" ]; then
+        SPOKEN="Claude"
+    fi
+    SPOKEN="$(printf '%s' "$SPOKEN" | tr '-' ' ')"
+
+    # Two sessions finishing together would talk over each other, so whoever
+    # gets the lock speaks and the other just dings.
+    SPEAK_LOCK="$HOME/.claude/claudenotify/speak.lock"
+    if [ -d "$SPEAK_LOCK" ] && [ -z "$(find "$SPEAK_LOCK" -maxdepth 0 -mmin -2 2>/dev/null)" ]; then
+        rmdir "$SPEAK_LOCK" 2>/dev/null
+    fi
+    if mkdir "$SPEAK_LOCK" 2>/dev/null; then
+        say -r 220 "$SPOKEN finished" 2>/dev/null
+        rmdir "$SPEAK_LOCK" 2>/dev/null
+    fi
+fi
+
 osascript -e 'display notification "Claude is done" with title "Claude Code"' 2>/dev/null || true
 
 """
@@ -274,6 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         try? fm.createDirectory(at: soundsDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: sessionSoundsDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: sessionVolumesDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: speakDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: liveDir, withIntermediateDirectories: true)
 
         let existing = try? String(contentsOf: scriptURL, encoding: .utf8)
@@ -700,6 +734,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 submenu.addItem(clear)
             }
 
+            let speak = NSMenuItem(title: "Speak Session Name",
+                                   action: #selector(toggleSpeakName(_:)),
+                                   keyEquivalent: "")
+            speak.target = self
+            speak.representedObject = session.id
+            speak.state = speaksName(session.id) ? .on : .off
+            submenu.addItem(speak)
+
             let preview = NSMenuItem(title: "Play This Session's Sound",
                                      action: #selector(playSessionSound(_:)),
                                      keyEquivalent: "")
@@ -735,6 +777,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let sessionID = sender.representedObject as? String else { return }
         play(assignedSound(for: sessionID) ?? selectedSound,
              volume: sessionVolume(for: sessionID))
+    }
+
+    func speaksName(_ sessionID: String) -> Bool {
+        FileManager.default.fileExists(atPath: speakDir.appendingPathComponent(sessionID).path)
+    }
+
+    @objc func toggleSpeakName(_ sender: NSMenuItem) {
+        guard let sessionID = sender.representedObject as? String else { return }
+        let fm = FileManager.default
+        let marker = speakDir.appendingPathComponent(sessionID)
+
+        if speaksName(sessionID) {
+            try? fm.removeItem(at: marker)
+            return
+        }
+
+        try? fm.createDirectory(at: speakDir, withIntermediateDirectories: true)
+        fm.createFile(atPath: marker.path, contents: nil)
+        speakPreview(for: sessionID)
+    }
+
+    func speakPreview(for sessionID: String) {
+        var spoken = "Claude"
+        if let transcript = transcriptURL(for: sessionID),
+           let title = lastJSONValue("aiTitle", in: tailText(of: transcript) ?? "") {
+            spoken = title
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
+        process.arguments = ["-r", "220", spoken.replacingOccurrences(of: "-", with: " ") + " finished"]
+        try? process.run()
     }
 
     // A session with no override follows the global slider, so the absence of a

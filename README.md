@@ -18,6 +18,7 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/sounds/     sounds you've added
 ~/.claude/claudenotify/sessions/   one file per session id, holding its sound
 ~/.claude/claudenotify/session-volumes/  per-session volume overrides
+~/.claude/claudenotify/speak/      marker per session that should announce its name
 ```
 
 When a turn ends, `notify.sh` checks the mute flag and exits if it's there. Otherwise it reads the chosen sound and volume, plays it with `afplay -v`, and posts a "Claude is done" banner. Every read is defensive: an unset, empty, or stale sound falls back to `Glass.aiff`, and a volume that isn't a bare number falls back to `1`. A bad state degrades to a working ding rather than to silence or a shell error.
@@ -90,7 +91,7 @@ The menu holds:
   - Anything you've imported appears below those.
 - **Sound → Add Sound…** copies audio files (aiff, wav, mp3, m4a, caf, aac) into `~/.claude/claudenotify/sounds/` and selects the last one added. Name collisions get numbered rather than overwriting.
 - **Sound → Reveal Sounds Folder** opens that folder in Finder, for adding or deleting files by hand.
-- **Sessions** lists your recent Claude Code sessions by name, so you can tell parallel work apart by ear. Open a session's submenu and choose **Use Current Sound** to give it the sound you currently have selected. Each session also gets its own **volume slider**, useful for turning a chatty background session down without losing the one you care about. A session with no override follows the global volume, and the submenu says which is in effect. **Clear Session Settings** drops both the sound and the volume override. A check mark on the session means it has its own sound.
+- **Sessions** lists your recent Claude Code sessions by name, so you can tell parallel work apart by ear. Open a session's submenu and choose **Use Current Sound** to give it the sound you currently have selected. Each session also gets its own **volume slider**, useful for turning a chatty background session down without losing the one you care about. A session with no override follows the global volume, and the submenu says which is in effect. **Speak Session Name** makes that session announce itself out loud when it finishes, which removes the need to memorise which tone means which work. **Clear Session Settings** drops both the sound and the volume override. A check mark on the session means it has its own sound.
 - **Volume** is a slider from 10% to 100%. The percentage above it updates as you drag, and releasing the slider plays the current sound at the new level so you can hear what you picked. It applies to both the in-app preview and the real notification.
 - **Play Test Sound** plays the current selection at the current volume.
 
@@ -113,6 +114,14 @@ A session killed outright, by closing the terminal or `kill -9`, never sends `Se
 **Titles lag slightly**, since `aiTitle` is only written once Claude has enough context to name the session.
 
 Transcripts can reach tens of megabytes, so the app reads only the last 200KB of each rather than parsing the file. That keeps opening the menu at a few milliseconds instead of seconds.
+
+### Speaking session names
+
+With **Speak Session Name** ticked, the script reads the session's title from the transcript the hook payload points at, so it always says the current name, and speaks it with `say -r 220`.
+
+Three things to expect. It is **opt-in per session**, because hearing every session announce itself all day is worse than a ding. A full title takes around **3.5 seconds** to speak against half a second for a chime, so it suits the one or two sessions you are actually waiting on. And if two speaking sessions finish at the same moment, a lock directory means one speaks and the other just dings, rather than both talking over each other; a lock older than two minutes is treated as stale and reclaimed.
+
+Ticket numbers are read as numbers, so `SMART-6177` comes out as "smart six thousand one hundred seventy seven". It identifies the ticket fine, and spelling digits out individually would mangle every other number in a title.
 
 ## Stack
 
