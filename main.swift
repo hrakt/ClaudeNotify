@@ -378,24 +378,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         return "Claude Code"
     }
 
+    // Every failure path ends in a visible banner. Permission can be refused at
+    // launch, revoked later, or the post itself can fail, and none of those may
+    // result in silence: the app raises its own plain banner instead.
     func postFinishedNotification(for sessionID: String, label: String? = nil) {
-        let content = UNMutableNotificationContent()
         let resolved = (label?.isEmpty == false) ? label! : describeSession(sessionID)
-        content.title = "Claude finished"
-        content.subtitle = resolved
-        content.body = "Click to switch to Warp."
-        content.userInfo = ["session": sessionID]
 
-        let request = UNNotificationRequest(
-            identifier: "\(sessionID)-\(Date().timeIntervalSince1970)",
-            content: content,
-            trigger: nil)
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+            guard let self else { return }
 
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error {
+            guard settings.authorizationStatus == .authorized else {
+                DispatchQueue.main.async {
+                    self.recordNotificationPermission(false)
+                    self.postFallbackBanner(resolved)
+                }
+                return
+            }
+
+            let content = UNMutableNotificationContent()
+            content.title = "Claude finished"
+            content.subtitle = resolved
+            content.body = "Click to switch to Warp."
+            content.userInfo = ["session": sessionID]
+
+            let request = UNNotificationRequest(
+                identifier: "\(sessionID)-\(Date().timeIntervalSince1970)",
+                content: content,
+                trigger: nil)
+
+            UNUserNotificationCenter.current().add(request) { error in
+                guard let error else { return }
                 NSLog("ClaudeNotify: could not post notification: \(error.localizedDescription)")
+                DispatchQueue.main.async { self.postFallbackBanner(resolved) }
             }
         }
+    }
+
+    func postFallbackBanner(_ label: String) {
+        let allowed = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:_/#-")
+        let safe = String(label.filter { allowed.contains($0) })
+        let script = "display notification \"Finished\" with title \"Claude Code\" subtitle \"\(safe)\""
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        try? process.run()
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
