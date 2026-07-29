@@ -19,6 +19,7 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/sessions/   one file per session id, holding its sound
 ~/.claude/claudenotify/session-volumes/  per-session volume overrides
 ~/.claude/claudenotify/speak/      marker per session that should announce its name
+~/.claude/claudenotify/ttys/       which terminal each session runs in
 ~/.claude/claudenotify/pending/    banner handoff: script drops a session id, app posts it
 ~/.claude/claudenotify/notifications-blocked  written when macOS refuses the app permission
 ```
@@ -133,6 +134,8 @@ There are two ways it can be posted, and the script picks automatically:
 
 1. **From the app.** The script drops the session id and label in `pending/`, the app notices within milliseconds and posts it. Only this route can be clicked (clicking brings Warp to the front), and only this route can be styled as a persistent alert in System Settings, because the notification belongs to ClaudeNotify.
 2. **From the script.** A plain `osascript` banner, titled `Claude Code` with the session name as the subtitle. Not clickable, since banners raised by `osascript` belong to Script Editor.
+
+Clicking the banner brings Warp to the front. It cannot focus the specific tab the session runs in, and that is not an oversight: Warp exposes no `warp://` action for focusing a tab, ships no AppleScript dictionary, and draws its own interface, so its tabs are not scriptable UI elements either. What the app can tell you is which terminal to look for: the session submenu shows a line like `Terminal: ttys002`, found by walking up from the hook process to the `claude` process that spawned it. Run `tty` in a Warp tab to see which one matches.
 
 Route 1 needs macOS to grant ClaudeNotify notification permission, which it refuses for an ad-hoc signed app. When the app is refused it writes `notifications-blocked`, and the script uses route 2 instead. So a refusal costs the click and the styling, never the notification itself. Delete that file if you later sign the app properly and want to retry.
 

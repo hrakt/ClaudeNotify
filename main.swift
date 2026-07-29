@@ -14,6 +14,7 @@ let sessionSoundsDir = supportDir.appendingPathComponent("sessions")
 let sessionVolumesDir = supportDir.appendingPathComponent("session-volumes")
 let speakDir = supportDir.appendingPathComponent("speak")
 let liveDir = supportDir.appendingPathComponent("live")
+let ttyDir = supportDir.appendingPathComponent("ttys")
 
 // The hook cannot post a clickable notification itself: banners raised by
 // osascript belong to Script Editor and ignore clicks. So it drops a file here
@@ -97,13 +98,42 @@ esac
 # closing. It is maintained before the mute check on purpose: muting silences
 # the ding, it should not blind the app to which sessions exist.
 LIVE_DIR="$HOME/.claude/claudenotify/live"
+TTY_DIR="$HOME/.claude/claudenotify/ttys"
 if [ -n "$SESSION_ID" ]; then
     mkdir -p "$LIVE_DIR" 2>/dev/null
     if [ "$EVENT" = "SessionEnd" ]; then
-        rm -f "$LIVE_DIR/$SESSION_ID"
+        rm -f "$LIVE_DIR/$SESSION_ID" "$TTY_DIR/$SESSION_ID"
         exit 0
     fi
     printf '%s' "$CWD" > "$LIVE_DIR/$SESSION_ID" 2>/dev/null
+
+    # Which terminal this session lives in. The hook is a descendant of the
+    # claude process, so walking up the tree finds it. Warp offers no way to
+    # focus a tab, so this is here to identify one by hand.
+    SESSION_TTY=""
+    WALK_PID=$$
+    for _ in 1 2 3 4 5 6; do
+        WALK_INFO="$(ps -o ppid=,comm=,tty= -p "$WALK_PID" 2>/dev/null)"
+        [ -z "$WALK_INFO" ] && break
+        WALK_PARENT="$(printf '%s' "$WALK_INFO" | awk '{print $1}')"
+        WALK_NAME="$(printf '%s' "$WALK_INFO" | awk '{print $2}')"
+        WALK_TTY="$(printf '%s' "$WALK_INFO" | awk '{print $3}')"
+        case "$WALK_NAME" in
+            *claude)
+                case "$WALK_TTY" in
+                    ttys*) SESSION_TTY="$WALK_TTY" ;;
+                esac
+                break
+                ;;
+        esac
+        [ -z "$WALK_PARENT" ] && break
+        [ "$WALK_PARENT" = "1" ] && break
+        WALK_PID="$WALK_PARENT"
+    done
+    if [ -n "$SESSION_TTY" ]; then
+        mkdir -p "$TTY_DIR" 2>/dev/null
+        printf '%s' "$SESSION_TTY" > "$TTY_DIR/$SESSION_ID" 2>/dev/null
+    fi
     if [ "$EVENT" = "SessionStart" ]; then
         exit 0
     fi
@@ -885,6 +915,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             volumeStatus.isEnabled = false
             submenu.addItem(volumeStatus)
 
+            if let tty = sessionTTY(session.id) {
+                let terminal = NSMenuItem(title: "Terminal: \(tty)", action: nil, keyEquivalent: "")
+                terminal.isEnabled = false
+                submenu.addItem(terminal)
+            }
+
             let age = NSMenuItem(title: "Active \(relativeAge(session.modified))", action: nil, keyEquivalent: "")
             age.isEnabled = false
             submenu.addItem(age)
@@ -953,6 +989,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         guard let sessionID = sender.representedObject as? String else { return }
         play(assignedSound(for: sessionID) ?? selectedSound,
              volume: sessionVolume(for: sessionID))
+    }
+
+    func sessionTTY(_ sessionID: String) -> String? {
+        guard let raw = try? String(contentsOf: ttyDir.appendingPathComponent(sessionID), encoding: .utf8) else {
+            return nil
+        }
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 
     func speaksName(_ sessionID: String) -> Bool {
