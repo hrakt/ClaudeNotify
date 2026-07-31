@@ -37,6 +37,17 @@ let sessionLimit = 8
 let soundPointerURL = supportDir.appendingPathComponent("sound")
 let volumePointerURL = supportDir.appendingPathComponent("volume")
 let mutedUntilURL = supportDir.appendingPathComponent("muted-until")
+let reminderMinutesURL = supportDir.appendingPathComponent("reminder-minutes")
+let reminderChoices: [(title: String, minutes: Int)] = [
+    ("Off", 0),
+    ("Every 5 Minutes", 5),
+    ("Every 10 Minutes", 10),
+    ("Every 30 Minutes", 30),
+]
+
+// Reminders stop eventually: a session you walked away from for the day should
+// not nag until midnight.
+let reminderLimit = 6
 let muteDurations: [(title: String, minutes: Int)] = [
     ("15 Minutes", 15),
     ("30 Minutes", 30),
@@ -276,6 +287,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     // click can toggle mute instead of opening a menu.
     let mainMenu = NSMenu()
     var pendingWatcher: DispatchSourceFileSystemObject?
+    var lastReminded: [String: Date] = [:]
+    var reminderCounts: [String: Int] = [:]
 
     var isPermanentlyMuted: Bool { FileManager.default.fileExists(atPath: flagURL.path) }
 
@@ -332,6 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateUI()
+            self?.checkReminders()
         }
 
         let center = UNUserNotificationCenter.current()
@@ -411,7 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     // Every failure path ends in a visible banner. Permission can be refused at
     // launch, revoked later, or the post itself can fail, and none of those may
     // result in silence: the app raises its own plain banner instead.
-    func postFinishedNotification(for sessionID: String, label: String? = nil) {
+    func postFinishedNotification(for sessionID: String, label: String? = nil, reminder: String? = nil) {
         let resolved = (label?.isEmpty == false) ? label! : describeSession(sessionID)
 
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
@@ -420,15 +434,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             guard settings.authorizationStatus == .authorized else {
                 DispatchQueue.main.async {
                     self.recordNotificationPermission(false)
-                    self.postFallbackBanner(resolved)
+                    self.postFallbackBanner(resolved, reminder: reminder)
                 }
                 return
             }
 
             let content = UNMutableNotificationContent()
-            content.title = "Claude finished"
+            content.title = reminder == nil ? "Claude finished" : "Claude still waiting"
             content.subtitle = resolved
-            content.body = "Click to switch to Warp."
+            content.body = reminder.map { "\($0). Click to switch to Warp." } ?? "Click to switch to Warp."
             content.userInfo = ["session": sessionID]
 
             let request = UNNotificationRequest(
@@ -439,15 +453,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             UNUserNotificationCenter.current().add(request) { error in
                 guard let error else { return }
                 NSLog("ClaudeNotify: could not post notification: \(error.localizedDescription)")
-                DispatchQueue.main.async { self.postFallbackBanner(resolved) }
+                DispatchQueue.main.async { self.postFallbackBanner(resolved, reminder: reminder) }
             }
         }
     }
 
-    func postFallbackBanner(_ label: String) {
+    func postFallbackBanner(_ label: String, reminder: String? = nil) {
         let allowed = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:_/#-")
         let safe = String(label.filter { allowed.contains($0) })
-        let script = "display notification \"Finished\" with title \"Claude Code\" subtitle \"\(safe)\""
+        let body = String((reminder ?? "Finished").filter { allowed.contains($0) })
+        let script = "display notification \"\(body)\" with title \"Claude Code\" subtitle \"\(safe)\""
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -616,6 +631,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let sessionsParent = NSMenuItem(title: "Sessions", action: nil, keyEquivalent: "")
         sessionsParent.submenu = sessionsMenu()
         menu.addItem(sessionsParent)
+
+        let activeReminder = reminderMinutes
+        let remindMenu = NSMenu()
+        for choice in reminderChoices {
+            let item = NSMenuItem(title: choice.title,
+                                  action: #selector(setReminderMinutes(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.representedObject = choice.minutes
+            item.state = choice.minutes == activeReminder ? .on : .off
+            remindMenu.addItem(item)
+        }
+        let remindParent = NSMenuItem(
+            title: activeReminder == 0 ? "Remind Me Again: Off" : "Remind Me Again: every \(activeReminder)m",
+            action: nil,
+            keyEquivalent: "")
+        remindParent.submenu = remindMenu
+        menu.addItem(remindParent)
 
         menu.addItem(.separator())
 
@@ -997,6 +1030,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
+    }
+
+    var reminderMinutes: Int {
+        guard let raw = try? String(contentsOf: reminderMinutesURL, encoding: .utf8),
+              let value = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return 0
+        }
+        return value
+    }
+
+    @objc func setReminderMinutes(_ sender: NSMenuItem) {
+        guard let minutes = sender.representedObject as? Int else { return }
+        try? String(minutes).write(to: reminderMinutesURL, atomically: true, encoding: .utf8)
+        lastReminded.removeAll()
+        reminderCounts.removeAll()
+    }
+
+    // A session counts as still waiting only if nothing has touched it since it
+    // finished. The transcript moves while Claude works, so it is the honest
+    // activity signal; the heartbeat alone would nag during a long turn.
+    func lastActivity(of session: SessionInfo) -> Date {
+        var latest = session.modified
+        if let transcript = transcriptURL(for: session.id),
+           let modified = try? transcript.resourceValues(
+               forKeys: [.contentModificationDateKey]).contentModificationDate,
+           modified > latest {
+            latest = modified
+        }
+        return latest
+    }
+
+    func checkReminders() {
+        let minutes = reminderMinutes
+        guard minutes > 0, !isMuted else { return }
+
+        let interval = TimeInterval(minutes * 60)
+        let now = Date()
+
+        for session in liveSessions() {
+            let idle = now.timeIntervalSince(lastActivity(of: session))
+
+            guard idle >= interval else {
+                lastReminded[session.id] = nil
+                reminderCounts[session.id] = nil
+                continue
+            }
+
+            if let last = lastReminded[session.id], now.timeIntervalSince(last) < interval { continue }
+            guard reminderCounts[session.id, default: 0] < reminderLimit else { continue }
+
+            lastReminded[session.id] = now
+            reminderCounts[session.id, default: 0] += 1
+
+            let waiting = Int(idle / 60)
+            postFinishedNotification(
+                for: session.id,
+                label: "\(session.project) · \(session.title)",
+                reminder: "Waiting \(waiting) minutes")
+            play(assignedSound(for: session.id) ?? selectedSound,
+                 volume: sessionVolume(for: session.id))
+        }
     }
 
     func speaksName(_ sessionID: String) -> Bool {

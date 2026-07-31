@@ -20,6 +20,7 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/session-volumes/  per-session volume overrides
 ~/.claude/claudenotify/speak/      marker per session that should announce its name
 ~/.claude/claudenotify/ttys/       which terminal each session runs in
+~/.claude/claudenotify/reminder-minutes  nag cadence in minutes, 0 = off
 ~/.claude/claudenotify/pending/    banner handoff: script drops a session id, app posts it
 ~/.claude/claudenotify/notifications-blocked  written when macOS refuses the app permission
 ```
@@ -95,6 +96,7 @@ The menu holds:
 - **Sound → Add Sound…** copies audio files (aiff, wav, mp3, m4a, caf, aac) into `~/.claude/claudenotify/sounds/` and selects the last one added. Name collisions get numbered rather than overwriting.
 - **Sound → Reveal Sounds Folder** opens that folder in Finder, for adding or deleting files by hand.
 - **Sessions** lists your recent Claude Code sessions by name, so you can tell parallel work apart by ear. Open a session's submenu and choose **Use Current Sound** to give it the sound you currently have selected. Each session also gets its own **volume slider**, useful for turning a chatty background session down without losing the one you care about. A session with no override follows the global volume, and the submenu says which is in effect. **Speak Session Name** makes that session announce itself out loud when it finishes, which removes the need to memorise which tone means which work. **Clear Session Settings** drops both the sound and the volume override. A check mark on the session means it has its own sound.
+- **Remind Me Again** re-notifies about a session that finished and is still sitting there untouched, every 5, 10 or 30 minutes. **Off by default.** A session stops being reminded the moment anything touches it, when it ends, while you are muted, and after six reminders, so walking away for the afternoon does not mean coming back to a wall of banners.
 - **Volume** is a slider from 10% to 100%. The percentage above it updates as you drag, and releasing the slider plays the current sound at the new level so you can hear what you picked. It applies to both the in-app preview and the real notification.
 - **Play Test Sound** plays the current selection at the current volume.
 
@@ -140,6 +142,12 @@ Clicking the banner brings Warp to the front. It cannot focus the specific tab t
 Route 1 needs macOS to grant ClaudeNotify notification permission, which it refuses for an ad-hoc signed app. When the app is refused it writes `notifications-blocked`, and the script uses route 2 instead. So a refusal costs the click and the styling, never the notification itself. Delete that file if you later sign the app properly and want to retry.
 
 The label text is stripped to letters, digits and simple punctuation before being interpolated into the AppleScript, so a session title cannot inject commands.
+
+### How reminders decide you have not come back
+
+Activity is the later of two timestamps: the session's heartbeat in `live/`, and its transcript's modification time. The transcript matters because it moves while Claude is working, so a long turn is not mistaken for you ignoring the session; the heartbeat alone would nag through it.
+
+Reminders live entirely in the app, needing no hook or `settings.json` change, so the cadence can be changed from the menu with nothing to reinstall. They are suppressed while muted, since muting means leave me alone, and the count resets as soon as the session shows activity again.
 
 ## Stack
 
