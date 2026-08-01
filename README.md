@@ -102,6 +102,14 @@ The menu holds:
 - **Volume** is a slider from 10% to 100%. The percentage above it updates as you drag, and releasing the slider plays the current sound at the new level so you can hear what you picked. It applies to both the in-app preview and the real notification.
 - **Play Test Sound** plays the current selection at the current volume.
 
+**Settings…** (⌘,) opens a window for the global settings, since a menu is a poor place to compare options or browse a hundred sounds:
+
+- Mute, volume, reminder cadence and repeat cap, all in one view rather than spread across submenus
+- Every sound on the machine in one searchable list, with the source of each (System, Alert Tones, Interface Sounds, Yours) beside it. Clicking one selects and previews it, and the list opens scrolled to the current choice
+- Add Sound and Reveal Sounds Folder
+
+Per-session settings stay in the menu bar, next to the session list they belong to.
+
 The menu rebuilds each time you open it, so files you add or delete in Finder show up without restarting the app.
 
 ### How sessions are found
