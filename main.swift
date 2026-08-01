@@ -38,16 +38,25 @@ let soundPointerURL = supportDir.appendingPathComponent("sound")
 let volumePointerURL = supportDir.appendingPathComponent("volume")
 let mutedUntilURL = supportDir.appendingPathComponent("muted-until")
 let reminderMinutesURL = supportDir.appendingPathComponent("reminder-minutes")
+let reminderLimitURL = supportDir.appendingPathComponent("reminder-limit")
 let reminderChoices: [(title: String, minutes: Int)] = [
     ("Off", 0),
+    ("Every 2 Minutes", 2),
     ("Every 5 Minutes", 5),
     ("Every 10 Minutes", 10),
     ("Every 30 Minutes", 30),
+    ("Every Hour", 60),
 ]
 
-// Reminders stop eventually: a session you walked away from for the day should
-// not nag until midnight.
-let reminderLimit = 6
+// Reminders stop eventually by default: a session you walked away from for the
+// day should not nag until midnight. Zero means keep going.
+let defaultReminderLimit = 6
+let reminderLimitChoices: [(title: String, limit: Int)] = [
+    ("Stop After 3", 3),
+    ("Stop After 6", 6),
+    ("Stop After 12", 12),
+    ("Never Stop", 0),
+]
 let muteDurations: [(title: String, minutes: Int)] = [
     ("15 Minutes", 15),
     ("30 Minutes", 30),
@@ -643,6 +652,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             item.state = choice.minutes == activeReminder ? .on : .off
             remindMenu.addItem(item)
         }
+        remindMenu.addItem(.separator())
+
+        let activeLimit = reminderLimit
+        let limitMenu = NSMenu()
+        for choice in reminderLimitChoices {
+            let item = NSMenuItem(title: choice.title,
+                                  action: #selector(setReminderLimit(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.representedObject = choice.limit
+            item.state = choice.limit == activeLimit ? .on : .off
+            limitMenu.addItem(item)
+        }
+        let limitParent = NSMenuItem(
+            title: activeLimit == 0 ? "Repeats: unlimited" : "Repeats: up to \(activeLimit)",
+            action: nil,
+            keyEquivalent: "")
+        limitParent.submenu = limitMenu
+        remindMenu.addItem(limitParent)
+
         let remindParent = NSMenuItem(
             title: activeReminder == 0 ? "Remind Me Again: Off" : "Remind Me Again: every \(activeReminder)m",
             action: nil,
@@ -1047,6 +1076,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         reminderCounts.removeAll()
     }
 
+    var reminderLimit: Int {
+        guard let raw = try? String(contentsOf: reminderLimitURL, encoding: .utf8),
+              let value = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+              value >= 0 else {
+            return defaultReminderLimit
+        }
+        return value
+    }
+
+    @objc func setReminderLimit(_ sender: NSMenuItem) {
+        guard let limit = sender.representedObject as? Int else { return }
+        try? String(limit).write(to: reminderLimitURL, atomically: true, encoding: .utf8)
+        reminderCounts.removeAll()
+    }
+
     // A session counts as still waiting only if nothing has touched it since it
     // finished. The transcript moves while Claude works, so it is the honest
     // activity signal; the heartbeat alone would nag during a long turn.
@@ -1078,7 +1122,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             }
 
             if let last = lastReminded[session.id], now.timeIntervalSince(last) < interval { continue }
-            guard reminderCounts[session.id, default: 0] < reminderLimit else { continue }
+
+            let limit = reminderLimit
+            if limit > 0, reminderCounts[session.id, default: 0] >= limit { continue }
 
             lastReminded[session.id] = now
             reminderCounts[session.id, default: 0] += 1
