@@ -6,7 +6,13 @@ cd "$(dirname "$0")"
 
 APP="ClaudeNotify.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+echo "Drawing icon…"
+swiftc -O make-icon.swift -o /tmp/claudenotify-make-icon
+rm -rf /tmp/ClaudeNotify.iconset
+/tmp/claudenotify-make-icon /tmp/ClaudeNotify.iconset >/dev/null
+iconutil -c icns /tmp/ClaudeNotify.iconset -o "$APP/Contents/Resources/AppIcon.icns"
 
 echo "Compiling…"
 swiftc -O main.swift -o "$APP/Contents/MacOS/ClaudeNotify"
@@ -23,6 +29,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleShortVersionString</key> <string>1.0</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleExecutable</key>      <string>ClaudeNotify</string>
+    <key>CFBundleIconFile</key>        <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>  <string>13.0</string>
     <key>LSUIElement</key>             <true/>
 </dict>

@@ -33,9 +33,11 @@ Because the hook only ever names the script, new features ship by rewriting the 
 ## Setup
 
 ```bash
-./build.sh            # compiles main.swift → ClaudeNotify.app
+./build.sh            # draws the icon, compiles main.swift → ClaudeNotify.app
 open ClaudeNotify.app # runs it (menu-bar only, no Dock icon)
 ```
+
+The icon is drawn by `make-icon.swift` rather than stored as a binary asset: a white bell on a blue gradient squircle, rendered at all ten sizes and packed into `AppIcon.icns` by `iconutil`. Editing the colours or glyph means editing code, and `./build.sh` regenerates it.
 
 Requires the Swift toolchain (Xcode command line tools) and macOS 13+.
 
@@ -149,7 +151,7 @@ There are two ways it can be posted, and the script picks automatically:
 
 Clicking the banner brings Warp to the front. It cannot focus the specific tab the session runs in, and that is not an oversight: Warp exposes no `warp://` action for focusing a tab, ships no AppleScript dictionary, and draws its own interface, so its tabs are not scriptable UI elements either. What the app can tell you is which terminal to look for: the session submenu shows a line like `Terminal: ttys002`, found by walking up from the hook process to the `claude` process that spawned it. Run `tty` in a Warp tab to see which one matches.
 
-Route 1 needs macOS to grant ClaudeNotify notification permission, which it refuses for an ad-hoc signed app. When the app is refused it writes `notifications-blocked`, and the script uses route 2 instead. So a refusal costs the click and the styling, never the notification itself. Delete that file if you later sign the app properly and want to retry.
+Route 1 needs macOS to grant ClaudeNotify notification permission. On this machine it reports `authorizationStatus = denied` with "Notifications are not allowed for this application", which an ad-hoc signed app gets by default. Because the status is *denied* rather than *not determined*, the app should be listed in System Settings under Notifications, where switching it on restores route 1, and with it the clickable banner and this app's own icon in place of Script Editor's. When the app is refused it writes `notifications-blocked`, and the script uses route 2 instead. So a refusal costs the click and the styling, never the notification itself. Delete that file if you later sign the app properly and want to retry.
 
 The label text is stripped to letters, digits and simple punctuation before being interpolated into the AppleScript, so a session title cannot inject commands.
 
