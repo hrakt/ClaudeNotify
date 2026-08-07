@@ -19,7 +19,8 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/sessions/   one file per session id, holding its sound
 ~/.claude/claudenotify/session-volumes/  per-session volume overrides
 ~/.claude/claudenotify/speak/      marker per session that should announce its name
-~/.claude/claudenotify/ttys/       which terminal each session runs in
+~/.claude/claudenotify/ttys/       which tty each session runs on
+~/.claude/claudenotify/terminals/  which terminal app each session runs in, and its tab handle
 ~/.claude/claudenotify/reminder-minutes  nag cadence in minutes, 0 = off
 ~/.claude/claudenotify/reminder-limit    how many repeats before giving up, 0 = unlimited
 ~/.claude/claudenotify/pending/    banner handoff: script drops a session id, app posts it
@@ -146,10 +147,28 @@ The banner names the session that finished rather than saying "Claude is done", 
 
 There are two ways it can be posted, and the script picks automatically:
 
-1. **From the app.** The script drops the session id and label in `pending/`, the app notices within milliseconds and posts it. Only this route can be clicked (clicking brings Warp to the front), and only this route can be styled as a persistent alert in System Settings, because the notification belongs to ClaudeNotify.
+1. **From the app.** The script drops the session id and label in `pending/`, the app notices within milliseconds and posts it. Only this route can be clicked (clicking goes to the session's terminal, see below), and only this route can be styled as a persistent alert in System Settings, because the notification belongs to ClaudeNotify.
 2. **From the script.** A plain `osascript` banner, titled `Claude Code` with the session name as the subtitle. Not clickable, since banners raised by `osascript` belong to Script Editor.
 
-Clicking the banner brings Warp to the front. It cannot focus the specific tab the session runs in, and that is not an oversight: Warp exposes no `warp://` action for focusing a tab, ships no AppleScript dictionary, and draws its own interface, so its tabs are not scriptable UI elements either. What the app can tell you is which terminal to look for: the session submenu shows a line like `Terminal: ttys002`, found by walking up from the hook process to the `claude` process that spawned it. Run `tty` in a Warp tab to see which one matches.
+Clicking the banner takes you to the session that raised it. Where that lands depends on which terminal the session is running in, which the app knows per session rather than by configuration.
+
+### Which terminal a session runs in
+
+There is no "default terminal" setting, on purpose. A global default would be wrong the moment work is spread across two terminals at once — half the banners would raise the wrong app, and the setting could not know which half. So the terminal is recorded per session instead, and there is nothing to configure.
+
+The hook is a descendant of the shell inside the tab, so it inherits that terminal's environment. It records `TERM_PROGRAM` to `terminals/<session-id>`, alongside `ORCA_TERMINAL_HANDLE` when Orca set one. The session submenu shows the result as `Terminal: Orca · ttys013`.
+
+Clicking a banner then does the most specific thing available:
+
+| Terminal | What a click does |
+|---|---|
+| Orca | switches to that session's **exact tab**, then raises Orca |
+| Warp, Ghostty, iTerm, Terminal, VS Code, Hyper, kitty, Alacritty | raises the app |
+| unrecognised, or a session predating this feature | raises Warp, the old behaviour |
+
+**Orca is the one that can focus a tab**, and not through the usual routes: it registers no `orca://` action for it (only `orca://pair`), ships no AppleScript dictionary, and its local hook server at `127.0.0.1:$ORCA_AGENT_HOOK_PORT` only accepts inbound `/hook/<agent>` posts. What it does have is a CLI — `orca terminal switch --terminal term_abc123` — taking the same handle the session was launched with. That runs in about 150ms, so the tab is already correct by the time the window comes forward. The CLI is looked up by path rather than by name, since an app launched from Finder inherits a minimal `PATH`.
+
+The other terminals raise the app only, because none of them expose a way in: Warp has no `warp://` tab action and no AppleScript dictionary, and Ghostty draws its own interface, so their tabs are not scriptable UI elements either. For those the `ttys` line is still the fastest way to find the tab by hand — run `tty` in a tab to see which one matches.
 
 Route 1 needs macOS to grant ClaudeNotify notification permission. On this machine it reports `authorizationStatus = denied` with "Notifications are not allowed for this application", which an ad-hoc signed app gets by default. Because the status is *denied* rather than *not determined*, the app should be listed in System Settings under Notifications, where switching it on restores route 1, and with it the clickable banner and this app's own icon in place of Script Editor's. When the app is refused it writes `notifications-blocked`, and the script uses route 2 instead. So a refusal costs the click and the styling, never the notification itself. Delete that file if you later sign the app properly and want to retry.
 

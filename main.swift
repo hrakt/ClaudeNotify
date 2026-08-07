@@ -15,13 +15,46 @@ let sessionVolumesDir = supportDir.appendingPathComponent("session-volumes")
 let speakDir = supportDir.appendingPathComponent("speak")
 let liveDir = supportDir.appendingPathComponent("live")
 let ttyDir = supportDir.appendingPathComponent("ttys")
+let terminalsDir = supportDir.appendingPathComponent("terminals")
 
 // The hook cannot post a clickable notification itself: banners raised by
 // osascript belong to Script Editor and ignore clicks. So it drops a file here
 // and the app, which can handle a click, posts the banner.
 let pendingDir = supportDir.appendingPathComponent("pending")
 let notificationsBlockedURL = supportDir.appendingPathComponent("notifications-blocked")
-let warpBundleID = "dev.warp.Warp-Stable"
+
+// Which terminal a session runs in is a fact about that session, not a global
+// preference: with work spread across Warp and Orca at once, one setting would
+// be wrong for half the banners. The hook records `TERM_PROGRAM` per session and
+// the click follows it, so nothing needs configuring and nothing can go stale.
+struct TerminalApp {
+    let name: String
+    let bundleID: String
+}
+
+let terminalCatalog: [String: TerminalApp] = [
+    "Orca": TerminalApp(name: "Orca", bundleID: "com.stablyai.orca"),
+    "WarpTerminal": TerminalApp(name: "Warp", bundleID: "dev.warp.Warp-Stable"),
+    "ghostty": TerminalApp(name: "Ghostty", bundleID: "com.mitchellh.ghostty"),
+    "iTerm.app": TerminalApp(name: "iTerm", bundleID: "com.googlecode.iterm2"),
+    "Apple_Terminal": TerminalApp(name: "Terminal", bundleID: "com.apple.Terminal"),
+    "vscode": TerminalApp(name: "VS Code", bundleID: "com.microsoft.VSCode"),
+    "Hyper": TerminalApp(name: "Hyper", bundleID: "co.zeit.hyper"),
+    "kitty": TerminalApp(name: "kitty", bundleID: "net.kovidgoyal.kitty"),
+    "alacritty": TerminalApp(name: "Alacritty", bundleID: "org.alacritty"),
+]
+
+// Sessions that predate terminal recording have no file to read, so the click
+// keeps doing what it did before rather than doing nothing at all.
+let legacyTerminal = TerminalApp(name: "Warp", bundleID: "dev.warp.Warp-Stable")
+
+// Launched from Finder the app inherits a minimal PATH, so the CLI is found by
+// looking rather than by name.
+let orcaCLICandidates = [
+    "/usr/local/bin/orca",
+    "/opt/homebrew/bin/orca",
+    "/Applications/Orca.app/Contents/Resources/bin/orca",
+]
 
 // SessionEnd removes a session from the registry, but a session killed outright
 // never sends it, so a heartbeat this old is treated as dead.
@@ -119,10 +152,12 @@ esac
 # the ding, it should not blind the app to which sessions exist.
 LIVE_DIR="$HOME/.claude/claudenotify/live"
 TTY_DIR="$HOME/.claude/claudenotify/ttys"
+TERMINAL_DIR="$HOME/.claude/claudenotify/terminals"
 if [ -n "$SESSION_ID" ]; then
     mkdir -p "$LIVE_DIR" 2>/dev/null
     if [ "$EVENT" = "SessionEnd" ]; then
-        rm -f "$LIVE_DIR/$SESSION_ID" "$TTY_DIR/$SESSION_ID"
+        rm -f "$LIVE_DIR/$SESSION_ID" "$TTY_DIR/$SESSION_ID" \\
+            "$TERMINAL_DIR/$SESSION_ID"
         exit 0
     fi
     printf '%s' "$CWD" > "$LIVE_DIR/$SESSION_ID" 2>/dev/null
@@ -154,6 +189,18 @@ if [ -n "$SESSION_ID" ]; then
         mkdir -p "$TTY_DIR" 2>/dev/null
         printf '%s' "$SESSION_TTY" > "$TTY_DIR/$SESSION_ID" 2>/dev/null
     fi
+
+    # Which terminal app owns this session, so the banner can raise that one
+    # instead of a hardcoded guess. The hook is a descendant of the shell in the
+    # tab, so it inherits the terminal's own environment. Orca additionally
+    # hands out a per-tab handle, which is what lets the click land on the exact
+    # tab rather than merely on the app.
+    if [ -n "$TERM_PROGRAM" ]; then
+        mkdir -p "$TERMINAL_DIR" 2>/dev/null
+        printf '%s\\n%s\\n' "$TERM_PROGRAM" "$ORCA_TERMINAL_HANDLE" \\
+            > "$TERMINAL_DIR/$SESSION_ID" 2>/dev/null
+    fi
+
     if [ "$EVENT" = "SessionStart" ]; then
         exit 0
     fi
@@ -285,6 +332,16 @@ struct SessionInfo {
     let title: String
     let project: String
     let modified: Date
+}
+
+struct SessionTerminal {
+    let program: String
+    let handle: String
+
+    // An unrecognised TERM_PROGRAM is not a failure: the session still names its
+    // terminal in the menu, it just cannot be raised by bundle id.
+    var app: TerminalApp? { terminalCatalog[program] }
+    var displayName: String { app?.name ?? program }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
@@ -456,10 +513,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                 return
             }
 
+            let target = self.sessionTerminal(sessionID)
+            let destination = target.map { record -> String in
+                record.program == "Orca" && !record.handle.isEmpty
+                    ? "Click to open this tab in \(record.displayName)."
+                    : "Click to switch to \(record.displayName)."
+            } ?? "Click to switch to your terminal."
+
             let content = UNMutableNotificationContent()
             content.title = reminder == nil ? "Claude finished" : "Claude still waiting"
             content.subtitle = resolved
-            content.body = reminder.map { "\($0). Click to switch to Warp." } ?? "Click to switch to Warp."
+            content.body = reminder.map { "\($0). \(destination)" } ?? destination
             content.userInfo = ["session": sessionID]
 
             let request = UNNotificationRequest(
@@ -496,19 +560,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        activateWarp()
+        let sessionID = response.notification.request.content.userInfo["session"] as? String
+        focusTerminal(for: sessionID ?? "")
         completionHandler()
     }
 
-    func activateWarp() {
+    // Two steps, in this order: switch the tab first, then raise the app, so the
+    // window that comes forward is already showing the right session rather than
+    // visibly flipping to it afterwards.
+    func focusTerminal(for sessionID: String) {
+        let record = sessionTerminal(sessionID)
+        let app = record?.app ?? legacyTerminal
+
+        guard let handle = record?.handle, !handle.isEmpty, record?.program == "Orca" else {
+            activate(app)
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.switchOrcaTab(to: handle)
+            DispatchQueue.main.async { self?.activate(app) }
+        }
+    }
+
+    func activate(_ app: TerminalApp) {
         if let running = NSRunningApplication.runningApplications(
-            withBundleIdentifier: warpBundleID).first {
+            withBundleIdentifier: app.bundleID).first {
             running.activate(options: [.activateAllWindows])
             return
         }
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: warpBundleID) {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleID) {
             NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
         }
+    }
+
+    // Orca ships no URL scheme and no AppleScript dictionary, but its CLI takes
+    // the same per-tab handle the session was launched with, which is the one
+    // supported way in from outside.
+    func switchOrcaTab(to handle: String) {
+        guard isValidOrcaHandle(handle),
+              let cli = orcaCLICandidates.first(where: {
+                  FileManager.default.isExecutableFile(atPath: $0)
+              }) else { return }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: cli)
+        process.arguments = ["terminal", "switch", "--terminal", handle]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            NSLog("ClaudeNotify: could not switch Orca tab: \(error.localizedDescription)")
+        }
+    }
+
+    func isValidOrcaHandle(_ handle: String) -> Bool {
+        guard handle.hasPrefix("term_"), handle.count < 80 else { return false }
+        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+        return handle.allSatisfy { allowed.contains($0) }
     }
 
     @objc func statusItemClicked() {
@@ -546,6 +658,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         try? fm.createDirectory(at: sessionVolumesDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: speakDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: liveDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: terminalsDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: pendingDir, withIntermediateDirectories: true)
 
         let existing = try? String(contentsOf: scriptURL, encoding: .utf8)
@@ -989,8 +1102,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             volumeStatus.isEnabled = false
             submenu.addItem(volumeStatus)
 
-            if let tty = sessionTTY(session.id) {
-                let terminal = NSMenuItem(title: "Terminal: \(tty)", action: nil, keyEquivalent: "")
+            let where_ = [sessionTerminal(session.id)?.displayName, sessionTTY(session.id)]
+                .compactMap { $0 }
+                .joined(separator: " · ")
+            if !where_.isEmpty {
+                let terminal = NSMenuItem(title: "Terminal: \(where_)", action: nil, keyEquivalent: "")
                 terminal.isEnabled = false
                 submenu.addItem(terminal)
             }
@@ -1071,6 +1187,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return value.isEmpty ? nil : value
+    }
+
+    // Line one is TERM_PROGRAM, line two the Orca tab handle when there is one.
+    // Terminals other than Orca write an empty second line, which reads back as
+    // "raise the app, no tab to target".
+    func sessionTerminal(_ sessionID: String) -> SessionTerminal? {
+        guard !sessionID.isEmpty,
+              let raw = try? String(contentsOf: terminalsDir.appendingPathComponent(sessionID),
+                                    encoding: .utf8) else { return nil }
+
+        let lines = raw.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard let program = lines.first, !program.isEmpty else { return nil }
+
+        return SessionTerminal(program: program,
+                               handle: lines.count > 1 ? lines[1] : "")
     }
 
     var reminderMinutes: Int {
