@@ -162,9 +162,10 @@ if [ -n "$SESSION_ID" ]; then
     fi
     printf '%s' "$CWD" > "$LIVE_DIR/$SESSION_ID" 2>/dev/null
 
-    # Which terminal this session lives in. The hook is a descendant of the
-    # claude process, so walking up the tree finds it. Warp offers no way to
-    # focus a tab, so this is here to identify one by hand.
+    # Which tty this session lives on. The hook is a descendant of the claude
+    # process, so walking up the tree finds it. Only Orca can be driven to a
+    # specific tab, so for every other terminal this is what lets you find the
+    # right one by hand: run `tty` in a tab and compare.
     SESSION_TTY=""
     WALK_PID=$$
     for _ in 1 2 3 4 5 6; do
@@ -513,12 +514,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                 return
             }
 
-            let target = self.sessionTerminal(sessionID)
-            let destination = target.map { record -> String in
-                record.program == "Orca" && !record.handle.isEmpty
-                    ? "Click to open this tab in \(record.displayName)."
-                    : "Click to switch to \(record.displayName)."
-            } ?? "Click to switch to your terminal."
+            // The body promises only what the click can deliver: an unknown
+            // terminal cannot be raised, so it is named rather than offered.
+            let destination: String
+            switch self.sessionTerminal(sessionID) {
+            case .none:
+                destination = "Click to switch to your terminal."
+            case .some(let record) where record.app == nil:
+                destination = "This session is in \(record.displayName)."
+            case .some(let record) where record.program == "Orca" && !record.handle.isEmpty:
+                destination = "Click to open this tab in \(record.displayName)."
+            case .some(let record):
+                destination = "Click to switch to \(record.displayName)."
+            }
 
             let content = UNMutableNotificationContent()
             content.title = reminder == nil ? "Claude finished" : "Claude still waiting"
@@ -569,14 +577,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     // window that comes forward is already showing the right session rather than
     // visibly flipping to it afterwards.
     func focusTerminal(for sessionID: String) {
-        let record = sessionTerminal(sessionID)
-        let app = record?.app ?? legacyTerminal
+        // Only a session with no record at all gets the legacy fallback. A
+        // session recorded in a terminal this app does not know stays put:
+        // raising some *other* terminal is worse than doing nothing, and the
+        // banner already told the truth about where the session is.
+        guard let record = sessionTerminal(sessionID) else {
+            activate(legacyTerminal)
+            return
+        }
+        guard let app = record.app else { return }
 
-        guard let handle = record?.handle, !handle.isEmpty, record?.program == "Orca" else {
+        // The tab switch is worth waiting on only when Orca is already up. With
+        // Orca closed the CLI spends a couple of seconds discovering there is no
+        // runtime, which reads as a dead click, so skip straight to launching.
+        let running = !NSRunningApplication.runningApplications(
+            withBundleIdentifier: app.bundleID).isEmpty
+
+        guard running, record.program == "Orca", !record.handle.isEmpty else {
             activate(app)
             return
         }
 
+        let handle = record.handle
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.switchOrcaTab(to: handle)
             DispatchQueue.main.async { self?.activate(app) }
