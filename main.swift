@@ -1015,7 +1015,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                 modified: heartbeat))
         }
 
+        pruneOrphanedRecords(keeping: Set(sessions.map { $0.id }))
         return sessions.sorted { $0.modified > $1.modified }
+    }
+
+    // live/ prunes itself by heartbeat above, but the records keyed to a session
+    // are only deleted by SessionEnd, which a session killed outright never
+    // sends. A record with no live entry and no write in the stale window
+    // belongs to a session that is long gone.
+    //
+    // Only the machine-recorded directories are swept. The per-session sound,
+    // volume and speak markers are choices the user made, and a session id that
+    // comes back deserves to find them still there.
+    func pruneOrphanedRecords(keeping ids: Set<String>) {
+        let fm = FileManager.default
+        let cutoff = Date().addingTimeInterval(-liveStaleWindow)
+
+        for directory in [ttyDir, terminalsDir] {
+            guard let files = try? fm.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]) else { continue }
+
+            for file in files where !ids.contains(file.lastPathComponent) {
+                // The age check is what makes this safe against a session still
+                // starting up, whose live entry may not be written yet.
+                guard let modified = try? file.resourceValues(
+                    forKeys: [.contentModificationDateKey]).contentModificationDate,
+                      modified < cutoff else { continue }
+                try? fm.removeItem(at: file)
+            }
+        }
     }
 
     // Sessions that predate the hooks being registered have no registry entry

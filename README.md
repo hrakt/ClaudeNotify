@@ -127,7 +127,7 @@ Which sessions are _live_ comes from a registry the script maintains at `~/.clau
 
 The registry is updated even while muted, since muting should silence the ding rather than hide which sessions exist.
 
-A session killed outright, by closing the terminal or `kill -9`, never sends `SessionEnd`, so entries with no heartbeat for 24 hours are pruned when the menu opens. Sessions that were already running before the hooks were registered have no entry until they next respond; while the registry is empty the app falls back to ranking transcripts by modification time, so the menu is never blank.
+A session killed outright, by closing the terminal or `kill -9`, never sends `SessionEnd`, so entries with no heartbeat for 24 hours are pruned when the menu opens. The same sweep drops `ttys/` and `terminals/` records that have no live session and no write in that window, since those are deleted by `SessionEnd` too and would otherwise accumulate. Only those two are swept: the per-session sound, volume and speak settings are choices you made, so a session id that comes back finds them still there. Sessions that were already running before the hooks were registered have no entry until they next respond; while the registry is empty the app falls back to ranking transcripts by modification time, so the menu is never blank.
 
 **Titles lag slightly**, since `aiTitle` is only written once Claude has enough context to name the session.
 
