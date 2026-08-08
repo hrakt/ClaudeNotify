@@ -1,4 +1,5 @@
 import Cocoa
+import CoreAudio
 import UniformTypeIdentifiers
 import UserNotifications
 
@@ -22,6 +23,48 @@ let terminalsDir = supportDir.appendingPathComponent("terminals")
 // and the app, which can handle a click, posts the banner.
 let pendingDir = supportDir.appendingPathComponent("pending")
 let notificationsBlockedURL = supportDir.appendingPathComponent("notifications-blocked")
+
+// A meeting is the microphone being live, which is one signal covering Meet,
+// Slack huddles, Zoom, Teams and FaceTime at once. Integrating with each service
+// would mean OAuth and upkeep per service; this needs no permission at all,
+// because asking whether a device is running is not recording from it.
+let inMeetingURL = supportDir.appendingPathComponent("in-meeting")
+let quietInMeetingsURL = supportDir.appendingPathComponent("quiet-in-meetings")
+
+// Banners raised during a meeting are held here rather than dropped, so walking
+// out of a call tells you what finished while you were in it.
+let deferredDir = supportDir.appendingPathComponent("deferred")
+
+// Matched as prefixes, since the process holding the microphone is usually a
+// helper: Chrome records as com.google.Chrome.helper, Slack as
+// com.tinyspeck.slackmacgap.helper.
+//
+// The list is what separates a meeting from any other use of the microphone.
+// Dictation, MacWhisper, Voice Memos and QuickTime all light up the same device,
+// and none of them mean you are unavailable.
+let meetingAppPrefixes = [
+    "com.google.Chrome",
+    "com.apple.Safari",
+    "com.apple.WebKit",
+    "org.mozilla.firefox",
+    "com.microsoft.edgemac",
+    "com.brave.Browser",
+    "company.thebrowser.Browser",
+    "com.tinyspeck.slackmacgap",
+    "us.zoom.xos",
+    "com.microsoft.teams",
+    "com.apple.FaceTime",
+    "com.apple.avconferenced",
+    "com.hnc.Discord",
+    "com.granola.app",
+]
+
+// The microphone opening for a moment is dictation or a notification chime, not
+// a meeting. Leaving needs a longer grace than joining, so a brief drop mid-call
+// does not end the meeting and let a ding through.
+let meetingStartDebounce: TimeInterval = 10
+let meetingEndGrace: TimeInterval = 20
+let meetingPollInterval: TimeInterval = 5
 
 // Which terminal a session runs in is a fact about that session, not a global
 // preference: with work spread across Warp and Orca at once, one setting would
@@ -225,6 +268,26 @@ if [ -f "$MUTED_UNTIL_FILE" ]; then
     esac
 fi
 
+APP_RUNNING=""
+if pgrep -f "ClaudeNotify.app/Contents/MacOS/ClaudeNotify" >/dev/null 2>&1; then
+    APP_RUNNING=1
+fi
+
+# The app raises this flag while a meeting app is holding the microphone. Unlike
+# muting, this does not exit: the ding and the announcement are what intrude, so
+# the banner is still handed to the app, which holds it and says what finished
+# once the meeting ends.
+#
+# The app is checked because it is the only thing that maintains this flag and
+# the only thing that can release what is held. Quitting during a meeting leaves
+# the flag behind, and honouring a leftover would silence the hook completely
+# and permanently: no ding, no banner, not even the fallback. So with the app
+# gone the flag means nothing.
+QUIET=""
+if [ -n "$APP_RUNNING" ] && [ -f "$HOME/.claude/claudenotify/in-meeting" ]; then
+    QUIET=1
+fi
+
 SOUND="/System/Library/Sounds/Glass.aiff"
 POINTER="$HOME/.claude/claudenotify/sound"
 if [ -f "$POINTER" ]; then
@@ -265,7 +328,9 @@ if [ -n "$SESSION_ID" ]; then
     fi
 fi
 
-afplay -v "$VOLUME" "$SOUND" 2>/dev/null
+if [ -z "$QUIET" ]; then
+    afplay -v "$VOLUME" "$SOUND" 2>/dev/null
+fi
 
 # The session's own name says more than "Claude is done", so it is resolved
 # once here and reused by both the announcement and the banner.
@@ -290,7 +355,8 @@ fi
 
 # Speaking the session name is opt-in per session: hearing every session
 # announce itself all day is worse than a ding.
-if [ -n "$SESSION_ID" ] && [ -f "$HOME/.claude/claudenotify/speak/$SESSION_ID" ]; then
+if [ -z "$QUIET" ] && [ -n "$SESSION_ID" ] \\
+    && [ -f "$HOME/.claude/claudenotify/speak/$SESSION_ID" ]; then
     SPOKEN="$SESSION_TITLE"
     if [ -z "$SPOKEN" ]; then
         SPOKEN="Claude"
@@ -312,12 +378,16 @@ fi
 # Preferred path: hand the banner to the app, which can name the session and
 # handle a click. The blocked marker exists when macOS refused the app
 # permission, in which case the plain banner is better than none.
-if [ -n "$SESSION_ID" ] \\
-    && [ ! -f "$HOME/.claude/claudenotify/notifications-blocked" ] \\
-    && pgrep -f "ClaudeNotify.app/Contents/MacOS/ClaudeNotify" >/dev/null 2>&1; then
+# While a meeting is on, the handoff happens even when macOS has refused the app
+# permission. Holding the banner is still worth doing: the app falls back to its
+# own plain banner when it comes to post the summary, so deferring loses the
+# styling rather than the notification.
+if [ -n "$SESSION_ID" ] && [ -n "$APP_RUNNING" ] \\
+    && { [ -n "$QUIET" ] \\
+        || [ ! -f "$HOME/.claude/claudenotify/notifications-blocked" ]; }; then
     mkdir -p "$HOME/.claude/claudenotify/pending" 2>/dev/null
     printf '%s' "$SESSION_LABEL" > "$HOME/.claude/claudenotify/pending/$SESSION_ID"
-else
+elif [ -z "$QUIET" ]; then
     SAFE_LABEL="$(printf '%s' "${SESSION_LABEL:-Claude Code}" | tr -cd 'A-Za-z0-9 .,:_/#-')"
     osascript -e "display notification \\"Finished\\" with title \\"Claude Code\\" subtitle \\"$SAFE_LABEL\\"" 2>/dev/null || true
 fi
@@ -364,6 +434,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     var settingsRepeatsPopup: NSPopUpButton?
     var lastReminded: [String: Date] = [:]
     var reminderCounts: [String: Int] = [:]
+    var micLiveSince: Date?
+    var micIdleSince: Date?
+    var inMeeting = false
+    var loggedMeetingUnavailable = false
 
     var isPermanentlyMuted: Bool { FileManager.default.fileExists(atPath: flagURL.path) }
 
@@ -430,6 +504,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             DispatchQueue.main.async { self?.recordNotificationPermission(granted) }
         }
         startWatchingPending()
+        startWatchingMicrophone()
+
+        // Anything still held was held by a previous run that ended mid-meeting.
+        // Reporting it now is the whole point of holding it; left alone it would
+        // otherwise surface at the end of some unrelated meeting days later.
+        postDeferredSummary()
         drainPending()
     }
 
@@ -472,6 +552,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             let sessionID = file.lastPathComponent
             let label = (try? String(contentsOf: file, encoding: .utf8))?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Held rather than posted: a banner during a call is the thing being
+            // avoided, and one summary afterwards says the same thing better.
+            // Keyed by session id, so a session finishing twice is held once.
+            if inMeeting {
+                try? fm.createDirectory(at: deferredDir, withIntermediateDirectories: true)
+                let held = deferredDir.appendingPathComponent(sessionID)
+                try? fm.removeItem(at: held)
+                try? fm.moveItem(at: file, to: held)
+                continue
+            }
+
             try? fm.removeItem(at: file)
             postFinishedNotification(for: sessionID, label: label)
         }
@@ -497,41 +589,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         return "Claude Code"
     }
 
-    // Every failure path ends in a visible banner. Permission can be refused at
-    // launch, revoked later, or the post itself can fail, and none of those may
-    // result in silence: the app raises its own plain banner instead.
     func postFinishedNotification(for sessionID: String, label: String? = nil, reminder: String? = nil) {
         let resolved = (label?.isEmpty == false) ? label! : describeSession(sessionID)
 
+        // The body promises only what the click can deliver: an unknown
+        // terminal cannot be raised, so it is named rather than offered.
+        let destination: String
+        switch sessionTerminal(sessionID) {
+        case .none:
+            destination = "Click to switch to your terminal."
+        case .some(let record) where record.app == nil:
+            destination = "This session is in \(record.displayName)."
+        case .some(let record) where record.program == "Orca" && !record.handle.isEmpty:
+            destination = "Click to open this tab in \(record.displayName)."
+        case .some(let record):
+            destination = "Click to switch to \(record.displayName)."
+        }
+
+        deliver(sessionID: sessionID,
+                title: reminder == nil ? "Claude finished" : "Claude still waiting",
+                subtitle: resolved,
+                body: reminder.map { "\($0). \(destination)" } ?? destination,
+                fallbackSubtitle: resolved,
+                fallbackBody: reminder)
+    }
+
+    func postSummaryNotification(sessionID: String, title: String, body: String) {
+        deliver(sessionID: sessionID,
+                title: title,
+                subtitle: body,
+                body: "Click to go to the most recent.",
+                fallbackSubtitle: body,
+                fallbackBody: title)
+    }
+
+    // Every failure path ends in a visible banner. Permission can be refused at
+    // launch, revoked later, or the post itself can fail, and none of those may
+    // result in silence: the app raises its own plain banner instead.
+    func deliver(sessionID: String,
+                 title: String,
+                 subtitle: String,
+                 body: String,
+                 fallbackSubtitle: String,
+                 fallbackBody: String?) {
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
             guard let self else { return }
 
             guard settings.authorizationStatus == .authorized else {
                 DispatchQueue.main.async {
                     self.recordNotificationPermission(false)
-                    self.postFallbackBanner(resolved, reminder: reminder)
+                    self.postFallbackBanner(fallbackSubtitle, reminder: fallbackBody)
                 }
                 return
             }
 
-            // The body promises only what the click can deliver: an unknown
-            // terminal cannot be raised, so it is named rather than offered.
-            let destination: String
-            switch self.sessionTerminal(sessionID) {
-            case .none:
-                destination = "Click to switch to your terminal."
-            case .some(let record) where record.app == nil:
-                destination = "This session is in \(record.displayName)."
-            case .some(let record) where record.program == "Orca" && !record.handle.isEmpty:
-                destination = "Click to open this tab in \(record.displayName)."
-            case .some(let record):
-                destination = "Click to switch to \(record.displayName)."
-            }
-
             let content = UNMutableNotificationContent()
-            content.title = reminder == nil ? "Claude finished" : "Claude still waiting"
-            content.subtitle = resolved
-            content.body = reminder.map { "\($0). \(destination)" } ?? destination
+            content.title = title
+            content.subtitle = subtitle
+            content.body = body
             content.userInfo = ["session": sessionID]
 
             let request = UNNotificationRequest(
@@ -542,7 +657,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             UNUserNotificationCenter.current().add(request) { error in
                 guard let error else { return }
                 NSLog("ClaudeNotify: could not post notification: \(error.localizedDescription)")
-                DispatchQueue.main.async { self.postFallbackBanner(resolved, reminder: reminder) }
+                DispatchQueue.main.async {
+                    self.postFallbackBanner(fallbackSubtitle, reminder: fallbackBody)
+                }
             }
         }
     }
@@ -681,7 +798,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         try? fm.createDirectory(at: speakDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: liveDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: terminalsDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: deferredDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: pendingDir, withIntermediateDirectories: true)
+
+        // The app owns this flag. Left behind by a crash or a force quit it
+        // would silence every ding until the next meeting ended, so launching
+        // clears it and detection puts it back within a poll if a call is live.
+        try? fm.removeItem(at: inMeetingURL)
 
         let existing = try? String(contentsOf: scriptURL, encoding: .utf8)
         if existing != scriptBody {
@@ -734,6 +857,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             let parent = NSMenuItem(title: "Mute For", action: nil, keyEquivalent: "")
             parent.submenu = muteFor
             menu.addItem(parent)
+        }
+
+        let quiet = NSMenuItem(title: "Quiet During Meetings",
+                               action: #selector(toggleQuietInMeetings),
+                               keyEquivalent: "")
+        quiet.target = self
+        quiet.state = quietInMeetings ? .on : .off
+        menu.addItem(quiet)
+
+        if inMeeting {
+            let held = heldCount()
+            let status = NSMenuItem(
+                title: held == 0
+                    ? "In a meeting, holding notifications"
+                    : "In a meeting, \(held) held",
+                action: nil,
+                keyEquivalent: "")
+            status.isEnabled = false
+            menu.addItem(status)
         }
 
         menu.addItem(.separator())
@@ -1303,7 +1445,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     func checkReminders() {
         let minutes = reminderMinutes
-        guard minutes > 0, !isMuted else { return }
+        // A meeting is exactly the situation a nag should stay out of, and the
+        // summary afterwards already covers what was missed.
+        guard minutes > 0, !isMuted, !inMeeting else { return }
 
         let interval = TimeInterval(minutes * 60)
         let now = Date()
@@ -1333,6 +1477,195 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             play(assignedSound(for: session.id) ?? selectedSound,
                  volume: sessionVolume(for: session.id))
         }
+    }
+
+    // MARK: - Meetings
+
+    var quietInMeetings: Bool {
+        guard let raw = try? String(contentsOf: quietInMeetingsURL, encoding: .utf8) else {
+            return true
+        }
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines) != "0"
+    }
+
+    @objc func toggleQuietInMeetings() {
+        let next = quietInMeetings ? "0" : "1"
+        try? next.write(to: quietInMeetingsURL, atomically: true, encoding: .utf8)
+
+        // Turning it off mid-meeting has to release what is being held, or the
+        // held banners wait for an end that will never be detected.
+        if next == "0" { endMeeting() }
+        evaluateMeeting()
+    }
+
+    // Polled rather than driven by a property listener: the default input device
+    // changes when headphones come and go, which means tearing down and
+    // re-registering the listener on the right object each time. Two property
+    // reads every few seconds costs nothing and cannot drift out of sync.
+    func startWatchingMicrophone() {
+        Timer.scheduledTimer(withTimeInterval: meetingPollInterval, repeats: true) { [weak self] _ in
+            self?.evaluateMeeting()
+        }
+        evaluateMeeting()
+    }
+
+    func audioProperty(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(mSelector: selector,
+                                   mScope: kAudioObjectPropertyScopeGlobal,
+                                   mElement: kAudioObjectPropertyElementMain)
+    }
+
+    // Asked per process rather than per device. Gating this on whether the
+    // *default* input is running looks like a cheap shortcut but silently loses
+    // every meeting held on an explicitly chosen microphone, which Zoom, Teams
+    // and Meet all let you pick. The process scan is authoritative on its own,
+    // and the prefix list is what keeps dictation out.
+    func meetingAppOnMicrophone() -> String? {
+        guard #available(macOS 14.4, *) else {
+            if !loggedMeetingUnavailable {
+                loggedMeetingUnavailable = true
+                NSLog("ClaudeNotify: meeting detection needs macOS 14.4 or later; staying off")
+            }
+            return nil
+        }
+
+        var address = audioProperty(kAudioHardwarePropertyProcessObjectList)
+        var size = UInt32(0)
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject),
+                                             &address, 0, nil, &size) == noErr else { return nil }
+
+        let count = Int(size) / MemoryLayout<AudioObjectID>.size
+        guard count > 0 else { return nil }
+
+        var objects = [AudioObjectID](repeating: 0, count: count)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),
+                                         &address, 0, nil, &size, &objects) == noErr else { return nil }
+
+        for object in objects where processIsRecording(object) {
+            guard let bundle = processBundleID(object) else { continue }
+            if meetingAppPrefixes.contains(where: { bundle.hasPrefix($0) }) { return bundle }
+        }
+        return nil
+    }
+
+    func processIsRecording(_ object: AudioObjectID) -> Bool {
+        var address = audioProperty(kAudioProcessPropertyIsRunningInput)
+        var running = UInt32(0)
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(object, &address, 0, nil, &size, &running) == noErr else {
+            return false
+        }
+        return running != 0
+    }
+
+    // CoreAudio hands back a retained string, so it is taken as retained rather
+    // than read through a CFString variable: doing the latter leaks one string
+    // per process per poll, which at this cadence adds up.
+    func processBundleID(_ object: AudioObjectID) -> String? {
+        var address = audioProperty(kAudioProcessPropertyBundleID)
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        var value: Unmanaged<CFString>?
+
+        let status = withUnsafeMutablePointer(to: &value) { pointer -> OSStatus in
+            AudioObjectGetPropertyData(object, &address, 0, nil, &size, pointer)
+        }
+        guard status == noErr, let value else { return nil }
+        return value.takeRetainedValue() as String
+    }
+
+    // Debounced in both directions. Joining waits, so dictation cannot pass for
+    // a meeting; leaving waits longer, so a moment of silence between speakers
+    // cannot let a ding through mid-call.
+    func evaluateMeeting() {
+        guard quietInMeetings else {
+            if inMeeting { endMeeting() }
+            // Cleared, not frozen: leaving these set means re-enabling while a
+            // listed app happens to hold the mic compares against a timestamp
+            // from days ago and skips the debounce entirely.
+            micLiveSince = nil
+            micIdleSince = nil
+            return
+        }
+
+        let now = Date()
+        let live = meetingAppOnMicrophone() != nil
+
+        if live {
+            micIdleSince = nil
+            if micLiveSince == nil { micLiveSince = now }
+            if !inMeeting, now.timeIntervalSince(micLiveSince ?? now) >= meetingStartDebounce {
+                beginMeeting()
+            }
+        } else {
+            micLiveSince = nil
+            if micIdleSince == nil { micIdleSince = now }
+            if inMeeting, now.timeIntervalSince(micIdleSince ?? now) >= meetingEndGrace {
+                endMeeting()
+            }
+        }
+    }
+
+    func heldCount() -> Int {
+        (try? FileManager.default.contentsOfDirectory(
+            at: deferredDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]))?.count ?? 0
+    }
+
+    func beginMeeting() {
+        inMeeting = true
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: inMeetingURL.path, contents: nil)
+        updateUI()
+    }
+
+    func endMeeting() {
+        let wasInMeeting = inMeeting
+        inMeeting = false
+        try? FileManager.default.removeItem(at: inMeetingURL)
+        if wasInMeeting { postDeferredSummary() }
+        updateUI()
+    }
+
+    // One banner for the whole meeting rather than a burst of them, since the
+    // useful question coming out of a call is what finished, not how often.
+    func postDeferredSummary() {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: deferredDir,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]), !files.isEmpty else { return }
+
+        // Anything held from long enough ago is not news any more: the app was
+        // quit mid-meeting and is only now starting again. Those are discarded
+        // rather than announced, so a relaunch cannot report yesterday's work as
+        // though it just finished.
+        let cutoff = Date().addingTimeInterval(-liveStaleWindow)
+        let held = files
+            .map { file -> (id: String, label: String, at: Date) in
+                let label = (try? String(contentsOf: file, encoding: .utf8))?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let at = (try? file.resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate) ?? Date.distantPast
+                return (file.lastPathComponent,
+                        label.isEmpty ? describeSession(file.lastPathComponent) : label,
+                        at)
+            }
+            .filter { $0.at > cutoff }
+            .sorted { $0.at > $1.at }
+
+        for file in files { try? fm.removeItem(at: file) }
+
+        // Clicking goes to the most recent, which is the one still waiting.
+        guard let newest = held.first else { return }
+        let title = held.count == 1
+            ? "Claude finished during your meeting"
+            : "Claude finished \(held.count) sessions during your meeting"
+        let body = held.count == 1
+            ? newest.label
+            : held.prefix(4).map { $0.label }.joined(separator: ", ")
+
+        postSummaryNotification(sessionID: newest.id, title: title, body: body)
     }
 
     func speaksName(_ sessionID: String) -> Bool {
@@ -1559,10 +1892,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     func updateUI() {
         let deadline = mutedUntil
         let muted = isMuted
-        let symbol = muted ? "bell.slash.fill" : "bell.fill"
+        // A meeting reads as its own state rather than as muting, because it
+        // ends by itself and the bell should not look like something you left
+        // switched off.
+        let symbol = muted ? "bell.slash.fill" : (inMeeting ? "bell.badge.slash.fill" : "bell.fill")
         var desc = muted ? "Claude completion sound muted" : "Claude completion sound on"
         if let deadline {
             desc = "Claude completion sound muted, \(remainingLabel(until: deadline))"
+        } else if inMeeting && !muted {
+            let held = heldCount()
+            desc = held == 0
+                ? "In a meeting, holding notifications"
+                : "In a meeting, \(held) notification\(held == 1 ? "" : "s") held"
         }
         if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: desc) {
             img.isTemplate = true   // adapts to light/dark menu bar
@@ -1574,6 +1915,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         }
         toggleItem?.state = muted ? .on : .off
         statusItem.button?.toolTip = "\(desc)\nClick to toggle, right-click for sounds and settings"
+    }
+
+    // Quitting mid-meeting must not leave the flag behind. The script ignores a
+    // flag with no app running, so this is belt and braces rather than the only
+    // guard, but it keeps the on-disk state honest.
+    func applicationWillTerminate(_ notification: Notification) {
+        try? FileManager.default.removeItem(at: inMeetingURL)
     }
 
     @objc func quit() { NSApp.terminate(nil) }

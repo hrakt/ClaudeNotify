@@ -23,6 +23,9 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/terminals/  which terminal app each session runs in, and its tab handle
 ~/.claude/claudenotify/reminder-minutes  nag cadence in minutes, 0 = off
 ~/.claude/claudenotify/reminder-limit    how many repeats before giving up, 0 = unlimited
+~/.claude/claudenotify/in-meeting  raised by the app while a meeting app holds the mic
+~/.claude/claudenotify/quiet-in-meetings  0 disables meeting detection, absent or 1 enables it
+~/.claude/claudenotify/deferred/   banners held during a meeting, summarised when it ends
 ~/.claude/claudenotify/pending/    banner handoff: script drops a session id, app posts it
 ~/.claude/claudenotify/notifications-blocked  written when macOS refuses the app permission
 ```
@@ -102,6 +105,7 @@ The menu holds:
 - **Sessions** lists your recent Claude Code sessions by name, so you can tell parallel work apart by ear. Open a session's submenu and choose **Use Current Sound** to give it the sound you currently have selected. Each session also gets its own **volume slider**, useful for turning a chatty background session down without losing the one you care about. A session with no override follows the global volume, and the submenu says which is in effect. **Speak Session Name** makes that session announce itself out loud when it finishes, which removes the need to memorise which tone means which work. **Clear Session Settings** drops both the sound and the volume override. A check mark on the session means it has its own sound.
 - **Remind Me Again** re-notifies about a session that finished and is still sitting there untouched: every 2, 5, 10 or 30 minutes, or hourly. **Off by default.** A session stops being reminded the moment anything touches it, when it ends, and while you are muted.
   - **Remind Me Again → Repeats** caps how many times one session may nag before it gives up: 3, 6 (the default), 12, or unlimited. Six at a ten minute cadence means a session you abandon goes quiet after an hour rather than all afternoon. The count resets as soon as the session is touched.
+- **Quiet During Meetings** holds the sound and the banners while you are on a call, and says what finished once it ends. On by default. See [Staying quiet during meetings](#staying-quiet-during-meetings).
 - **Volume** is a slider from 10% to 100%. The percentage above it updates as you drag, and releasing the slider plays the current sound at the new level so you can hear what you picked. It applies to both the in-app preview and the real notification.
 - **Play Test Sound** plays the current selection at the current volume.
 
@@ -173,6 +177,35 @@ The other terminals raise the app only, because none of them expose a way in: Wa
 Route 1 needs macOS to grant ClaudeNotify notification permission. On this machine it reports `authorizationStatus = denied` with "Notifications are not allowed for this application", which an ad-hoc signed app gets by default. Because the status is *denied* rather than *not determined*, the app should be listed in System Settings under Notifications, where switching it on restores route 1, and with it the clickable banner and this app's own icon in place of Script Editor's. When the app is refused it writes `notifications-blocked`, and the script uses route 2 instead. So a refusal costs the click and the styling, never the notification itself. Delete that file if you later sign the app properly and want to retry.
 
 The label text is stripped to letters, digits and simple punctuation before being interpolated into the AppleScript, so a session title cannot inject commands.
+
+### Staying quiet during meetings
+
+A ding in the middle of a call is the worst time for one, so the app watches for meetings and holds its noise until they end. **On by default**; turn it off with **Quiet During Meetings** in the menu.
+
+**A meeting is the microphone being live.** That one signal covers Google Meet, Slack huddles, Zoom, Teams, FaceTime and Discord at once, which is why there is no per-service integration here: each would mean OAuth, a token to keep alive, and its own way of breaking. Asking CoreAudio whether the input device is running is not recording from it, so this needs **no microphone permission and raises no prompt**.
+
+The question is asked *per process*, not per device: `kAudioHardwarePropertyProcessObjectList` gives every process touching audio, and a meeting is one of them holding the input whose bundle id is a known meeting app. The process list is what keeps dictation, MacWhisper, Voice Memos and QuickTime out — they light up the same hardware and none of them mean you are unavailable.
+
+Checking the *default* input device instead looks like a cheaper shortcut and is a trap: Zoom, Teams and Meet all let you pick an explicit microphone, and when that is not the system default the device reads as idle while the call is in full swing. The per-process scan has no such blind spot.
+
+This uses the CoreAudio process API added in **macOS 14.4**. On anything older the feature stays off and logs once saying so, rather than appearing to work.
+
+Two debounces keep it steady. The microphone must be live for **10 seconds** before a meeting starts, so a dictation burst cannot pass for one, and idle for **20 seconds** before it ends, so a pause between speakers cannot let a ding through mid-call.
+
+While a meeting is on:
+
+- the completion sound and the spoken announcement are suppressed
+- reminders are suppressed, since a meeting is exactly what a nag should stay out of
+- banners are **held rather than dropped**, in `deferred/`
+- the menu-bar bell shows a badged icon, and the menu says how many are held
+
+When the meeting ends you get **one** banner — "Claude finished 3 sessions during your meeting" — rather than the burst that had been building up. Clicking it goes to the most recent, which is the one still waiting on you. Launching posts any summary still held from a run that ended mid-meeting, and anything older than a day is discarded rather than announced, so a relaunch cannot report yesterday's work as though it just finished.
+
+The flag is a file, so the script obeys it even mid-run, exactly as it obeys muting. The difference is that muting exits early and this does not: the ding is what intrudes, so the banner is still handed to the app to hold. During a meeting that handoff happens even when macOS has refused the app notification permission, because the app falls back to its own plain banner when it posts the summary — deferring costs the styling, never the notification.
+
+**The script only honours the flag while the app is running**, which is what keeps a leftover from being dangerous. The app is the only thing that maintains the flag and the only thing that can release what is held, so a flag with no app behind it is a leftover from a quit or a crash. Honouring one would be the worst failure this app has: no ding, no banner, not even the `osascript` fallback, silently and forever. Ignoring it instead means the failure mode is a ding you did not want rather than silence you never asked for. The app also clears the flag on quit and at launch, but that is belt and braces — the script does not depend on it.
+
+Detection is polled every 5 seconds rather than driven by a property listener. The default input device changes whenever headphones come and go, which would mean tearing down and re-registering the listener on the right object each time; two property reads on a timer cannot drift out of sync with the hardware.
 
 ### How reminders decide you have not come back
 
