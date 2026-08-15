@@ -1,0 +1,228 @@
+import Cocoa
+import UserNotifications
+
+extension AppDelegate {
+    func startWatchingPending() {
+        let descriptor = open(pendingDir.path, O_EVTONLY)
+        guard descriptor >= 0 else {
+            NSLog("ClaudeNotify: could not watch \(pendingDir.path)")
+            return
+        }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write],
+            queue: .main)
+        source.setEventHandler { [weak self] in self?.drainPending() }
+        source.setCancelHandler { close(descriptor) }
+        source.resume()
+        pendingWatcher = source
+    }
+
+    // The script reads this marker and falls back to its own plain banner, so a
+    // refusal by macOS costs the click and the styling, never the notification.
+    func recordNotificationPermission(_ granted: Bool) {
+        let fm = FileManager.default
+        if granted {
+            try? fm.removeItem(at: notificationsBlockedURL)
+        } else {
+            try? fm.createDirectory(at: supportDir, withIntermediateDirectories: true)
+            fm.createFile(atPath: notificationsBlockedURL.path, contents: nil)
+        }
+    }
+
+    func drainPending() {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: pendingDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]) else { return }
+
+        for file in files {
+            let sessionID = file.lastPathComponent
+            let label = (try? String(contentsOf: file, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Held rather than posted: a banner during a call is the thing being
+            // avoided, and one summary afterwards says the same thing better.
+            // Keyed by session id, so a session finishing twice is held once.
+            if inMeeting {
+                try? fm.createDirectory(at: deferredDir, withIntermediateDirectories: true)
+                let held = deferredDir.appendingPathComponent(sessionID)
+                try? fm.removeItem(at: held)
+                try? fm.moveItem(at: file, to: held)
+                continue
+            }
+
+            try? fm.removeItem(at: file)
+            postFinishedNotification(for: sessionID, label: label)
+        }
+    }
+
+    func postFinishedNotification(for sessionID: String, label: String? = nil, reminder: String? = nil) {
+        let resolved = (label?.isEmpty == false) ? label! : describeSession(sessionID)
+
+        // The body promises only what the click can deliver: an unknown
+        // terminal cannot be raised, so it is named rather than offered.
+        let destination: String
+        switch sessionTerminal(sessionID) {
+        case .none:
+            destination = "Click to switch to your terminal."
+        case .some(let record) where record.app == nil:
+            destination = "This session is in \(record.displayName)."
+        case .some(let record) where record.program == "Orca" && !record.handle.isEmpty:
+            destination = "Click to open this tab in \(record.displayName)."
+        case .some(let record):
+            destination = "Click to switch to \(record.displayName)."
+        }
+
+        deliver(sessionID: sessionID,
+                title: reminder == nil ? "Claude finished" : "Claude still waiting",
+                subtitle: resolved,
+                body: reminder.map { "\($0). \(destination)" } ?? destination,
+                fallbackSubtitle: resolved,
+                fallbackBody: reminder)
+    }
+
+    func postSummaryNotification(sessionID: String, title: String, body: String) {
+        deliver(sessionID: sessionID,
+                title: title,
+                subtitle: body,
+                body: "Click to go to the most recent.",
+                fallbackSubtitle: body,
+                fallbackBody: title)
+    }
+
+    // Every failure path ends in a visible banner. Permission can be refused at
+    // launch, revoked later, or the post itself can fail, and none of those may
+    // result in silence: the app raises its own plain banner instead.
+    func deliver(sessionID: String,
+                 title: String,
+                 subtitle: String,
+                 body: String,
+                 fallbackSubtitle: String,
+                 fallbackBody: String?) {
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+            guard let self else { return }
+
+            guard settings.authorizationStatus == .authorized else {
+                DispatchQueue.main.async {
+                    self.recordNotificationPermission(false)
+                    self.postFallbackBanner(fallbackSubtitle, reminder: fallbackBody)
+                }
+                return
+            }
+
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.subtitle = subtitle
+            content.body = body
+            content.userInfo = ["session": sessionID]
+
+            let request = UNNotificationRequest(
+                identifier: "\(sessionID)-\(Date().timeIntervalSince1970)",
+                content: content,
+                trigger: nil)
+
+            UNUserNotificationCenter.current().add(request) { error in
+                guard let error else { return }
+                NSLog("ClaudeNotify: could not post notification: \(error.localizedDescription)")
+                DispatchQueue.main.async {
+                    self.postFallbackBanner(fallbackSubtitle, reminder: fallbackBody)
+                }
+            }
+        }
+    }
+
+    func postFallbackBanner(_ label: String, reminder: String? = nil) {
+        let allowed = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:_/#-")
+        let safe = String(label.filter { allowed.contains($0) })
+        let body = String((reminder ?? "Finished").filter { allowed.contains($0) })
+        let script = "display notification \"\(body)\" with title \"Claude Code\" subtitle \"\(safe)\""
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        try? process.run()
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let sessionID = response.notification.request.content.userInfo["session"] as? String
+        focusTerminal(for: sessionID ?? "")
+        completionHandler()
+    }
+
+    var reminderMinutes: Int {
+        guard let raw = try? String(contentsOf: reminderMinutesURL, encoding: .utf8),
+              let value = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return 0
+        }
+        return value
+    }
+
+    @objc func setReminderMinutes(_ sender: NSMenuItem) {
+        guard let minutes = sender.representedObject as? Int else { return }
+        try? String(minutes).write(to: reminderMinutesURL, atomically: true, encoding: .utf8)
+        lastReminded.removeAll()
+        reminderCounts.removeAll()
+    }
+
+    var reminderLimit: Int {
+        guard let raw = try? String(contentsOf: reminderLimitURL, encoding: .utf8),
+              let value = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+              value >= 0 else {
+            return defaultReminderLimit
+        }
+        return value
+    }
+
+    @objc func setReminderLimit(_ sender: NSMenuItem) {
+        guard let limit = sender.representedObject as? Int else { return }
+        try? String(limit).write(to: reminderLimitURL, atomically: true, encoding: .utf8)
+        reminderCounts.removeAll()
+    }
+
+    func checkReminders() {
+        let minutes = reminderMinutes
+        // A meeting is exactly the situation a nag should stay out of, and the
+        // summary afterwards already covers what was missed.
+        guard minutes > 0, !isMuted, !inMeeting else { return }
+
+        let interval = TimeInterval(minutes * 60)
+        let now = Date()
+
+        for session in liveSessions() {
+            let idle = now.timeIntervalSince(lastActivity(of: session))
+
+            guard idle >= interval else {
+                lastReminded[session.id] = nil
+                reminderCounts[session.id] = nil
+                continue
+            }
+
+            if let last = lastReminded[session.id], now.timeIntervalSince(last) < interval { continue }
+
+            let limit = reminderLimit
+            if limit > 0, reminderCounts[session.id, default: 0] >= limit { continue }
+
+            lastReminded[session.id] = now
+            reminderCounts[session.id, default: 0] += 1
+
+            let waiting = Int(idle / 60)
+            postFinishedNotification(
+                for: session.id,
+                label: "\(session.project) · \(session.title)",
+                reminder: "Waiting \(waiting) minutes")
+            play(assignedSound(for: session.id) ?? selectedSound,
+                 volume: sessionVolume(for: session.id))
+        }
+    }
+
+}

@@ -216,3 +216,23 @@ Reminders live entirely in the app, needing no hook or `settings.json` change, s
 ## Stack
 
 Swift + Cocoa (`NSStatusItem`), no dependencies.
+
+```
+main.swift              entry point, and nothing else
+Sources/Support.swift   paths, catalogs, tuneable constants, small value types
+Sources/HookScript.swift the bash the app writes to ~/.claude/claudenotify/notify.sh
+Sources/AppDelegate.swift the class and its stored state; every method lives in an extension
+Sources/Lifecycle.swift  launch, quit, the status item, muting
+Sources/Notifications.swift banners, the click, reminders
+Sources/Meetings.swift   microphone detection and holding notifications
+Sources/Sessions.swift   the live registry, transcripts, pruning
+Sources/Terminals.swift  which terminal a session is in, and focusing it
+Sources/Sounds.swift     the sound library and playback
+Sources/Menu.swift       menu construction
+Sources/Settings.swift   the settings window
+make-icon.swift         a separate program, run by build.sh to draw AppIcon.icns
+```
+
+`main.swift` holds only the entry point because Swift permits top-level statements in a file with that name and nowhere else. `AppDelegate` keeps its stored properties in one place and everything else is an `extension`, so a file can be opened without needing the rest.
+
+`build.sh` names its inputs explicitly (`Sources/*.swift main.swift`) rather than globbing, since `make-icon.swift` is a second program with its own entry point and would collide.

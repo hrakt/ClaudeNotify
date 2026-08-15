@@ -14,8 +14,12 @@ rm -rf /tmp/ClaudeNotify.iconset
 /tmp/claudenotify-make-icon /tmp/ClaudeNotify.iconset >/dev/null
 iconutil -c icns /tmp/ClaudeNotify.iconset -o "$APP/Contents/Resources/AppIcon.icns"
 
+# Sources/ holds the app; main.swift is only the entry point, and has to stay
+# separate because Swift allows top-level statements in a file with that name
+# and nowhere else. make-icon.swift is a second program with its own entry
+# point, which is why this is an explicit list rather than a *.swift glob.
 echo "Compiling…"
-swiftc -O main.swift -o "$APP/Contents/MacOS/ClaudeNotify"
+swiftc -O Sources/*.swift main.swift -o "$APP/Contents/MacOS/ClaudeNotify"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
