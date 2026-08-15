@@ -32,6 +32,13 @@ extension AppDelegate {
                                                options: [])],
                 intentIdentifiers: [],
                 options: []),
+            UNNotificationCategory(
+                identifier: meetingEndedCategoryID,
+                actions: [UNNotificationAction(identifier: stayQuietActionID,
+                                               title: "Stay Quiet",
+                                               options: [])],
+                intentIdentifiers: [],
+                options: []),
         ])
         center.requestAuthorization(options: [.alert]) { [weak self] granted, error in
             NSLog("ClaudeNotify: notification authorization granted=\(granted) error=\(error?.localizedDescription ?? "none")")

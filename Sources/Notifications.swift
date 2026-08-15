@@ -157,11 +157,18 @@ extension AppDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        // Both buttons are scoped to the meeting they were posted about, since a
+        // delivered banner outlives it. Muting the app days later off a stale
+        // notice is the same class of mistake as silencing the wrong call.
+        let announced = response.notification.request.content.userInfo["meeting"] as? Int
+
+        if response.actionIdentifier == stayQuietActionID {
+            if announced == meetingID { stayQuiet() }
+            completionHandler()
+            return
+        }
+
         if response.actionIdentifier == meetingOverrideActionID {
-            // Delivered banners outlive the meeting they announced. Pressing the
-            // button on yesterday's notice must not silence today's call, so the
-            // action only counts for the meeting it was posted about.
-            let announced = response.notification.request.content.userInfo["meeting"] as? Int
             if announced == meetingID { overrideMeeting() }
             completionHandler()
             return

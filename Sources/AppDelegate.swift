@@ -1,4 +1,5 @@
 import Cocoa
+import CoreAudio
 import UserNotifications
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
@@ -27,6 +28,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     var meetingNoticePosted = false
     var meetingID = 0
     var loggedMeetingUnavailable = false
+    var audioListeners: [(AudioDeviceID, AudioObjectPropertyListenerBlock)] = []
+    var meetingCheckTimer: Timer?
+    var forcedMeetingWatcher: DispatchSourceFileSystemObject?
 
     var isPermanentlyMuted: Bool { FileManager.default.fileExists(atPath: flagURL.path) }
 

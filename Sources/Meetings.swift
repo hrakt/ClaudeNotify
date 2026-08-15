@@ -20,65 +20,42 @@ extension AppDelegate {
         evaluateMeeting()
     }
 
-    // Polled rather than driven by a property listener: the default input device
-    // changes when headphones come and go, which means tearing down and
-    // re-registering the listener on the right object each time. Two property
-    // reads every few seconds costs nothing and cannot drift out of sync.
-    func startWatchingMicrophone() {
-        Timer.scheduledTimer(withTimeInterval: meetingPollInterval, repeats: true) { [weak self] _ in
-            self?.evaluateMeeting()
-        }
-        evaluateMeeting()
-    }
-
-    func audioProperty(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
+    func audioProperty(_ selector: AudioObjectPropertySelector,
+                       scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(mSelector: selector,
-                                   mScope: kAudioObjectPropertyScopeGlobal,
+                                   mScope: scope,
                                    mElement: kAudioObjectPropertyElementMain)
     }
 
-    // Asked per process rather than per device. Gating this on whether the
-    // *default* input is running looks like a cheap shortcut but silently loses
-    // every meeting held on an explicitly chosen microphone, which Zoom, Teams
-    // and Meet all let you pick. The process scan is authoritative on its own,
-    // and the prefix list is what keeps dictation out.
-    func meetingAppOnMicrophone() -> String? {
+    // The microphone being live is the whole test. It is the same thing the
+    // orange dot in the menu bar is drawn from, so what the app considers a
+    // meeting is exactly what macOS is already telling you about itself, with
+    // nothing to keep in sync and no app it can fail to have heard of.
+    //
+    // The cost is that dictation and voice memos count too. Three things make
+    // that survivable rather than annoying: joining takes ten unbroken seconds,
+    // which most dictation never reaches; nothing is announced unless a session
+    // is actually running to be held back; and when something is announced it
+    // arrives with a button that undoes it.
+    func detectedActivity() -> String? {
         // Testing affordance. The rest of this cannot be exercised without
         // joining a real call, which makes the one notification the user sees
         // least testable part of the app. `touch ~/.claude/claudenotify/
         // force-meeting` stands in for a detection; delete it to end the
         // meeting. Opt-in by creating a file, so it cannot fire by accident.
         if FileManager.default.fileExists(atPath: forceMeetingURL.path) {
-            return "a test"
+            return "Meeting in a test"
         }
 
-        guard #available(macOS 14.4, *) else {
-            if !loggedMeetingUnavailable {
-                loggedMeetingUnavailable = true
-                NSLog("ClaudeNotify: meeting detection needs macOS 14.4 or later; staying off")
-            }
-            return nil
+        guard micIsRunning() else { return nil }
+
+        // Naming is best-effort and detection does not depend on it, so an
+        // unrecognised app still holds notifications; it is just described by
+        // what is true rather than by a guess at what it is for.
+        if #available(macOS 14.4, *), let app = processInputUsage().app {
+            return "Meeting in \(app)"
         }
-
-        var address = audioProperty(kAudioHardwarePropertyProcessObjectList)
-        var size = UInt32(0)
-        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject),
-                                             &address, 0, nil, &size) == noErr else { return nil }
-
-        let count = Int(size) / MemoryLayout<AudioObjectID>.size
-        guard count > 0 else { return nil }
-
-        var objects = [AudioObjectID](repeating: 0, count: count)
-        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),
-                                         &address, 0, nil, &size, &objects) == noErr else { return nil }
-
-        for object in objects where processIsRecording(object) {
-            guard let bundle = processBundleID(object) else { continue }
-            if let app = meetingApps.first(where: { bundle.hasPrefix($0.prefix) }) {
-                return app.name
-            }
-        }
-        return nil
+        return "Your microphone is in use"
     }
 
     func processIsRecording(_ object: AudioObjectID) -> Bool {
@@ -126,7 +103,7 @@ extension AppDelegate {
         }
 
         let now = Date()
-        let detected = meetingAppOnMicrophone()
+        let detected = detectedActivity()
 
         if let detected {
             micIdleSince = nil
@@ -152,7 +129,7 @@ extension AppDelegate {
             micLiveSince = nil
             if micIdleSince == nil { micIdleSince = now }
             if now.timeIntervalSince(micIdleSince ?? now) >= meetingEndGrace {
-                if inMeeting { endMeeting() }
+                if inMeeting { endMeeting(micWentIdle: true) }
                 // The override belongs to one meeting. Clearing it here, once
                 // the mic has genuinely been idle, is what re-arms the next one.
                 meetingOverridden = false
@@ -189,19 +166,19 @@ extension AppDelegate {
         // both redundant and the only banner to survive the mute.
         guard !isMuted else { return }
 
-        // Nothing running means nothing to hold back, and a browser in this list
-        // takes the microphone for plenty of things that are not meetings: a
-        // dictation field, a voice message, a recorder in a page. Announcing a
-        // hold in that state trades a silent false positive for a banner that
-        // interrupts to say nothing is being interrupted.
+        // Nothing running means nothing to hold back. The microphone goes live
+        // for plenty of things that are not meetings — dictation, a voice
+        // message, a recorder in a page — and announcing a hold in that state
+        // trades a silent false positive for a banner that interrupts to say
+        // nothing is being interrupted.
         guard !liveSessions().isEmpty else { return }
 
         meetingNoticePosted = true
         deliver(sessionID: "",
-                title: "Meeting in \(app)",
+                title: app,
                 subtitle: "Holding Claude notifications until it ends",
                 body: "Sounds and banners resume by themselves.",
-                fallbackSubtitle: "Meeting in \(app)",
+                fallbackSubtitle: app,
                 // The fallback banner is a plain osascript one and cannot carry
                 // a button, so it names the way out rather than offering it.
                 fallbackBody: "Holding notifications. Quiet During Meetings in the menu overrides it",
@@ -217,22 +194,72 @@ extension AppDelegate {
         endMeeting()
     }
 
-    func endMeeting() {
+    // `micWentIdle` distinguishes the meeting actually ending from the other
+    // three ways this is reached — the override, the setting being switched off,
+    // and the feature being disabled mid-call. Only the first has anything to
+    // announce. Without it, pressing Notify Anyway answers you with "your
+    // microphone is free again" while you are still on the call, offering a Stay
+    // Quiet button that does the exact opposite of what you just asked for.
+    func endMeeting(micWentIdle: Bool = false) {
         let wasInMeeting = inMeeting
+        let announced = meetingNoticePosted
         inMeeting = false
+        meetingNoticePosted = false
         try? FileManager.default.removeItem(at: inMeetingURL)
-        if wasInMeeting { postDeferredSummary() }
+
+        if wasInMeeting {
+            // The summary already says notifications are back, so a second
+            // banner saying the same thing would be noise. Only a meeting that
+            // held nothing needs telling.
+            let reported = postDeferredSummary()
+            if micWentIdle, announced, !reported { postResumedNotice() }
+        }
+        updateUI()
+    }
+
+    // The other half of the promise. Having been told notifications were being
+    // held, you are told when they are not, so the quiet has a visible end
+    // rather than just an absence you eventually stop noticing.
+    //
+    // Only ever sent when the hold was announced in the first place. A detection
+    // that never said anything — muted, or nothing running to hold — has nothing
+    // to report the end of, and announcing one would make every stray minute of
+    // dictation cost a banner.
+    func postResumedNotice() {
+        guard !isMuted else { return }
+
+        deliver(sessionID: "",
+                title: "Notifications are back on",
+                subtitle: "Your microphone is free again",
+                body: "Nothing finished while you were away.",
+                fallbackSubtitle: "Notifications are back on",
+                fallbackBody: "Your microphone is free again",
+                category: meetingEndedCategoryID,
+                info: ["meeting": meetingID])
+    }
+
+    // The inverse of Notify Anyway: the detection was right that you were busy
+    // but wrong that you are finished, so this keeps the quiet going. It sets
+    // the ordinary mute rather than inventing a third state, which means the
+    // bell shows it and one click on the bell undoes it.
+    func stayQuiet() {
+        try? FileManager.default.createDirectory(at: flagURL.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: flagURL.path, contents: nil)
         updateUI()
     }
 
     // One banner for the whole meeting rather than a burst of them, since the
     // useful question coming out of a call is what finished, not how often.
-    func postDeferredSummary() {
+    // Reports whether it had anything to say, so the caller knows whether the
+    // end of the meeting has already been announced.
+    @discardableResult
+    func postDeferredSummary() -> Bool {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(
             at: deferredDir,
             includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]), !files.isEmpty else { return }
+            options: [.skipsHiddenFiles]), !files.isEmpty else { return false }
 
         // Anything held from long enough ago is not news any more: the app was
         // quit mid-meeting and is only now starting again. Those are discarded
@@ -255,7 +282,7 @@ extension AppDelegate {
         for file in files { try? fm.removeItem(at: file) }
 
         // Clicking goes to the most recent, which is the one still waiting.
-        guard let newest = held.first else { return }
+        guard let newest = held.first else { return false }
         let title = held.count == 1
             ? "Claude finished during your meeting"
             : "Claude finished \(held.count) sessions during your meeting"
@@ -264,5 +291,6 @@ extension AppDelegate {
             : held.prefix(4).map { $0.label }.joined(separator: ", ")
 
         postSummaryNotification(sessionID: newest.id, title: title, body: body)
+        return true
     }
 }

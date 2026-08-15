@@ -185,11 +185,17 @@ A ding in the middle of a call is the worst time for one, so the app watches for
 
 **A meeting is the microphone being live.** That one signal covers Google Meet, Slack huddles, Zoom, Teams, FaceTime and Discord at once, which is why there is no per-service integration here: each would mean OAuth, a token to keep alive, and its own way of breaking. Asking CoreAudio whether the input device is running is not recording from it, so this needs **no microphone permission and raises no prompt**.
 
-The question is asked *per process*, not per device: `kAudioHardwarePropertyProcessObjectList` gives every process touching audio, and a meeting is one of them holding the input whose bundle id is a known meeting app. The process list is what keeps dictation, MacWhisper, Voice Memos and QuickTime out — they light up the same hardware and none of them mean you are unavailable.
+This is the same thing the **orange dot** in your menu bar is drawn from. macOS exposes no API for the dot itself, but it exposes what the dot is drawn from, so what this app considers a meeting is exactly what the system is already telling you about itself — nothing to keep in sync, and no app it can fail to have heard of.
 
-Checking the *default* input device instead looks like a cheaper shortcut and is a trap: Zoom, Teams and Meet all let you pick an explicit microphone, and when that is not the system default the device reads as idle while the call is in full swing. The per-process scan has no such blind spot.
+It watches **every input device**, not just the default one. Zoom, Teams and Meet all let you pick an explicit microphone, and checking only the system default means a call held on a USB interface or a headset reads as silence for its entire duration.
 
-This uses the CoreAudio process API added in **macOS 14.4**. On anything older the feature stays off and logs once saying so, rather than appearing to work.
+**Asking the device is not enough, and this is the subtle part.** `kAudioDevicePropertyDeviceIsRunningSomewhere` trips on *playback* just as readily as on capture — measured here as an output device reading `running=1` under `afplay` while no process reported any input. Built-in speakers are output-only and get filtered out, but AirPods, USB headsets, audio interfaces and aggregate devices all enumerate channels in **both** directions, so they survive that filter. Trusting the device alone would mean music through AirPods reads as a meeting for exactly as long as the music plays.
+
+So it is two steps. The device answers the cheap question — is anything using audio at all — and the **process list** answers the real one, since `kAudioProcessPropertyIsRunningInput` distinguishes recording from playing. One pass over that list also yields which app is responsible, which is where the notice gets "Meeting in Slack" rather than "your microphone is in use".
+
+That second step needs the CoreAudio process API from **macOS 14.4**. On anything older the app keeps the device signal and logs once to say so, on the grounds that a meeting held through is worse than music occasionally mistaken for one.
+
+The remaining cost is that dictation, voice memos and QuickTime genuinely do count. Three things make that survivable rather than annoying: joining takes **ten unbroken seconds**, which most dictation never reaches; nothing is announced unless a session is actually running to be held back; and when something is announced, it arrives with a button that undoes it.
 
 Two debounces keep it steady. The microphone must be live for **10 seconds** before a meeting starts, so a dictation burst cannot pass for one, and idle for **20 seconds** before it ends, so a pause between speakers cannot let a ding through mid-call.
 
@@ -212,6 +218,16 @@ While a meeting is on:
 - banners are **held rather than dropped**, in `deferred/`
 - the menu-bar bell shows a badged icon, and the menu says how many are held
 
+**And it tells you when the quiet ends**, so the hold has a visible end rather than an absence you eventually stop noticing:
+
+> **Notifications are back on**
+> Your microphone is free again
+> Nothing finished while you were away.        [ Stay Quiet ]
+
+**Stay Quiet** is the inverse of *Notify Anyway*: the detection was right that you were busy but wrong that you are finished. It sets the ordinary mute rather than inventing a third state, so the bell shows it and one click on the bell undoes it.
+
+This is only ever sent if the hold was announced in the first place. A detection that never said anything — because you were muted, or because nothing was running to hold — has no ending to report, and announcing one would make every stray minute of dictation cost a banner. If sessions *did* finish, the summary below is sent instead, since it already says notifications are back.
+
 When the meeting ends you get **one** banner — "Claude finished 3 sessions during your meeting" — rather than the burst that had been building up. Clicking it goes to the most recent, which is the one still waiting on you. Launching posts any summary still held from a run that ended mid-meeting, and anything older than a day is discarded rather than announced, so a relaunch cannot report yesterday's work as though it just finished.
 
 The flag is a file, so the script obeys it even mid-run, exactly as it obeys muting. The difference is that muting exits early and this does not: the ding is what intrudes, so the banner is still handed to the app to hold. During a meeting that handoff happens even when macOS has refused the app notification permission, because the app falls back to its own plain banner when it posts the summary — deferring costs the styling, never the notification.
@@ -227,7 +243,11 @@ rm    ~/.claude/claudenotify/force-meeting   # ~20s later: the summary appears
 
 It is opt-in by creating a file, so it cannot fire by accident, and the app ignores it the moment the file is gone.
 
-Detection is polled every 5 seconds rather than driven by a property listener. The default input device changes whenever headphones come and go, which would mean tearing down and re-registering the listener on the right object each time; two property reads on a timer cannot drift out of sync with the hardware.
+**Detection is event-driven.** CoreAudio calls back the moment a microphone starts or stops, so the app is not asking every few seconds and the debounce runs from the real transition rather than from whenever the next poll happened to land. There are two levels of listener: one per input device for starting and stopping, and one on the device list itself, because devices appear and disappear every time headphones are plugged in and the per-device registrations have to be rebuilt against the new list. Missing that second one is how a listener-based design quietly stops working halfway through the afternoon.
+
+A sweep still runs every 60 seconds behind the listeners. They have not been observed to miss an edge, but a missed one would mean silence with no way back, and a property read a minute costs nothing to rule that out.
+
+Stopping a recording turns out to flap — a real teardown was measured going `running=0`, `1`, `0` inside 100ms — which is the other reason leaving waits longer than joining.
 
 ### How reminders decide you have not come back
 
@@ -246,7 +266,8 @@ Sources/HookScript.swift the bash the app writes to ~/.claude/claudenotify/notif
 Sources/AppDelegate.swift the class and its stored state; every method lives in an extension
 Sources/Lifecycle.swift  launch, quit, the status item, muting
 Sources/Notifications.swift banners, the click, reminders
-Sources/Meetings.swift   microphone detection and holding notifications
+Sources/Devices.swift    CoreAudio: which microphones exist, and when they start and stop
+Sources/Meetings.swift   what counts as a meeting, and holding notifications through it
 Sources/Sessions.swift   the live registry, transcripts, pruning
 Sources/Terminals.swift  which terminal a session is in, and focusing it
 Sources/Sounds.swift     the sound library and playback

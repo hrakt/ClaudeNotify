@@ -65,13 +65,19 @@ let meetingApps: [(prefix: String, name: String)] = [
 // a notification posted without one is silently dropped by macOS.
 let meetingCategoryID = "meeting-detected"
 let meetingOverrideActionID = "meeting-notify-anyway"
+let meetingEndedCategoryID = "meeting-ended"
+let stayQuietActionID = "meeting-stay-quiet"
 
 // The microphone opening for a moment is dictation or a notification chime, not
 // a meeting. Leaving needs a longer grace than joining, so a brief drop mid-call
 // does not end the meeting and let a ding through.
 let meetingStartDebounce: TimeInterval = 10
 let meetingEndGrace: TimeInterval = 20
-let meetingPollInterval: TimeInterval = 5
+
+// CoreAudio reports device changes as they happen, so this is not how the app
+// notices a meeting; it is only a backstop against a missed edge, whose cost
+// would be silence with no way back.
+let meetingSweepInterval: TimeInterval = 60
 
 // Which terminal a session runs in is a fact about that session, not a global
 // preference: with work spread across Warp and Orca at once, one setting would
