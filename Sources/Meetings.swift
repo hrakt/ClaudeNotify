@@ -43,6 +43,15 @@ extension AppDelegate {
     // and Meet all let you pick. The process scan is authoritative on its own,
     // and the prefix list is what keeps dictation out.
     func meetingAppOnMicrophone() -> String? {
+        // Testing affordance. The rest of this cannot be exercised without
+        // joining a real call, which makes the one notification the user sees
+        // least testable part of the app. `touch ~/.claude/claudenotify/
+        // force-meeting` stands in for a detection; delete it to end the
+        // meeting. Opt-in by creating a file, so it cannot fire by accident.
+        if FileManager.default.fileExists(atPath: forceMeetingURL.path) {
+            return "a test"
+        }
+
         guard #available(macOS 14.4, *) else {
             if !loggedMeetingUnavailable {
                 loggedMeetingUnavailable = true
@@ -65,7 +74,9 @@ extension AppDelegate {
 
         for object in objects where processIsRecording(object) {
             guard let bundle = processBundleID(object) else { continue }
-            if meetingAppPrefixes.contains(where: { bundle.hasPrefix($0) }) { return bundle }
+            if let app = meetingApps.first(where: { bundle.hasPrefix($0.prefix) }) {
+                return app.name
+            }
         }
         return nil
     }
@@ -103,26 +114,48 @@ extension AppDelegate {
             if inMeeting { endMeeting() }
             // Cleared, not frozen: leaving these set means re-enabling while a
             // listed app happens to hold the mic compares against a timestamp
-            // from days ago and skips the debounce entirely.
+            // from days ago and skips the debounce entirely. The override goes
+            // with them, or switching the feature off while one is in effect
+            // strands it: the menu would claim to be notifying anyway for a
+            // meeting that ended days ago, and switching the feature back on
+            // during the same call would silently do nothing.
             micLiveSince = nil
             micIdleSince = nil
+            meetingOverridden = false
             return
         }
 
         let now = Date()
-        let live = meetingAppOnMicrophone() != nil
+        let detected = meetingAppOnMicrophone()
 
-        if live {
+        if let detected {
             micIdleSince = nil
             if micLiveSince == nil { micLiveSince = now }
-            if !inMeeting, now.timeIntervalSince(micLiveSince ?? now) >= meetingStartDebounce {
+            // Overridden means you already answered this meeting's question, so
+            // it is not asked again until the call actually ends.
+            if !inMeeting, !meetingOverridden,
+               now.timeIntervalSince(micLiveSince ?? now) >= meetingStartDebounce {
                 beginMeeting()
+            }
+
+            // The notice can decline to post at the moment a meeting starts:
+            // muting silences everything anyway, and with no session running
+            // there is nothing to hold back. Both of those change during a
+            // call — a timed mute runs out, a session gets started — and either
+            // would otherwise leave notifications held with nothing having said
+            // so and no button to escape with. So it is retried, not posted
+            // once and forgotten.
+            if inMeeting, !meetingNoticePosted {
+                postMeetingNotice(detectedIn: detected)
             }
         } else {
             micLiveSince = nil
             if micIdleSince == nil { micIdleSince = now }
-            if inMeeting, now.timeIntervalSince(micIdleSince ?? now) >= meetingEndGrace {
-                endMeeting()
+            if now.timeIntervalSince(micIdleSince ?? now) >= meetingEndGrace {
+                if inMeeting { endMeeting() }
+                // The override belongs to one meeting. Clearing it here, once
+                // the mic has genuinely been idle, is what re-arms the next one.
+                meetingOverridden = false
             }
         }
     }
@@ -136,9 +169,52 @@ extension AppDelegate {
 
     func beginMeeting() {
         inMeeting = true
+        meetingNoticePosted = false
+        // Identifies this meeting for the lifetime of its notice. Notification
+        // Center keeps delivered banners around, so without it the button on a
+        // notice from a finished call would silence the one happening now.
+        meetingID += 1
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: inMeetingURL.path, contents: nil)
         updateUI()
+    }
+
+    // Going quiet without saying so is indistinguishable from being broken, and
+    // this app's whole job is making noise. So the one notification allowed
+    // through is the one announcing that the rest are being held, and it carries
+    // the way out with it: a detection this owns can be wrong, and being wrong
+    // must cost a click rather than a missed afternoon.
+    func postMeetingNotice(detectedIn app: String) {
+        // Muting already silences everything, so a notice about silence would be
+        // both redundant and the only banner to survive the mute.
+        guard !isMuted else { return }
+
+        // Nothing running means nothing to hold back, and a browser in this list
+        // takes the microphone for plenty of things that are not meetings: a
+        // dictation field, a voice message, a recorder in a page. Announcing a
+        // hold in that state trades a silent false positive for a banner that
+        // interrupts to say nothing is being interrupted.
+        guard !liveSessions().isEmpty else { return }
+
+        meetingNoticePosted = true
+        deliver(sessionID: "",
+                title: "Meeting in \(app)",
+                subtitle: "Holding Claude notifications until it ends",
+                body: "Sounds and banners resume by themselves.",
+                fallbackSubtitle: "Meeting in \(app)",
+                // The fallback banner is a plain osascript one and cannot carry
+                // a button, so it names the way out rather than offering it.
+                fallbackBody: "Holding notifications. Quiet During Meetings in the menu overrides it",
+                category: meetingCategoryID,
+                info: ["meeting": meetingID])
+    }
+
+    // Deliberately scoped to this meeting rather than to the setting. Someone
+    // reaching for this wants the notifications they are waiting on now, not to
+    // turn the feature off and rediscover a month later why calls got noisy.
+    func overrideMeeting() {
+        meetingOverridden = true
+        endMeeting()
     }
 
     func endMeeting() {

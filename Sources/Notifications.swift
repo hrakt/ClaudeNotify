@@ -100,7 +100,9 @@ extension AppDelegate {
                  subtitle: String,
                  body: String,
                  fallbackSubtitle: String,
-                 fallbackBody: String?) {
+                 fallbackBody: String?,
+                 category: String? = nil,
+                 info: [String: Any] = [:]) {
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
             guard let self else { return }
 
@@ -116,7 +118,8 @@ extension AppDelegate {
             content.title = title
             content.subtitle = subtitle
             content.body = body
-            content.userInfo = ["session": sessionID]
+            content.userInfo = info.merging(["session": sessionID]) { current, _ in current }
+            if let category { content.categoryIdentifier = category }
 
             let request = UNNotificationRequest(
                 identifier: "\(sessionID)-\(Date().timeIntervalSince1970)",
@@ -154,8 +157,25 @@ extension AppDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        let sessionID = response.notification.request.content.userInfo["session"] as? String
-        focusTerminal(for: sessionID ?? "")
+        if response.actionIdentifier == meetingOverrideActionID {
+            // Delivered banners outlive the meeting they announced. Pressing the
+            // button on yesterday's notice must not silence today's call, so the
+            // action only counts for the meeting it was posted about.
+            let announced = response.notification.request.content.userInfo["meeting"] as? Int
+            if announced == meetingID { overrideMeeting() }
+            completionHandler()
+            return
+        }
+
+        // The meeting notice carries no session, and falling through would raise
+        // a terminal at random on a banner that is not about one.
+        guard let sessionID = response.notification.request.content.userInfo["session"] as? String,
+              !sessionID.isEmpty else {
+            completionHandler()
+            return
+        }
+
+        focusTerminal(for: sessionID)
         completionHandler()
     }
 

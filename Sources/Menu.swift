@@ -65,6 +65,12 @@ extension AppDelegate {
                 keyEquivalent: "")
             status.isEnabled = false
             menu.addItem(status)
+        } else if meetingOverridden {
+            let status = NSMenuItem(title: "Notifying anyway for this meeting",
+                                    action: nil,
+                                    keyEquivalent: "")
+            status.isEnabled = false
+            menu.addItem(status)
         }
 
         menu.addItem(.separator())

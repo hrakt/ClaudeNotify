@@ -28,6 +28,7 @@ let notificationsBlockedURL = supportDir.appendingPathComponent("notifications-b
 // because asking whether a device is running is not recording from it.
 let inMeetingURL = supportDir.appendingPathComponent("in-meeting")
 let quietInMeetingsURL = supportDir.appendingPathComponent("quiet-in-meetings")
+let forceMeetingURL = supportDir.appendingPathComponent("force-meeting")
 
 // Banners raised during a meeting are held here rather than dropped, so walking
 // out of a call tells you what finished while you were in it.
@@ -40,22 +41,30 @@ let deferredDir = supportDir.appendingPathComponent("deferred")
 // The list is what separates a meeting from any other use of the microphone.
 // Dictation, MacWhisper, Voice Memos and QuickTime all light up the same device,
 // and none of them mean you are unavailable.
-let meetingAppPrefixes = [
-    "com.google.Chrome",
-    "com.apple.Safari",
-    "com.apple.WebKit",
-    "org.mozilla.firefox",
-    "com.microsoft.edgemac",
-    "com.brave.Browser",
-    "company.thebrowser.Browser",
-    "com.tinyspeck.slackmacgap",
-    "us.zoom.xos",
-    "com.microsoft.teams",
-    "com.apple.FaceTime",
-    "com.apple.avconferenced",
-    "com.hnc.Discord",
-    "com.granola.app",
+// Named as well as matched, so the notice can say what it saw. "A meeting" is
+// a claim the user has to take on trust; "Meeting in Slack" is one they can
+// check at a glance, and correct if it is wrong.
+let meetingApps: [(prefix: String, name: String)] = [
+    ("com.google.Chrome", "Chrome"),
+    ("com.apple.Safari", "Safari"),
+    ("com.apple.WebKit", "Safari"),
+    ("org.mozilla.firefox", "Firefox"),
+    ("com.microsoft.edgemac", "Edge"),
+    ("com.brave.Browser", "Brave"),
+    ("company.thebrowser.Browser", "Arc"),
+    ("com.tinyspeck.slackmacgap", "Slack"),
+    ("us.zoom.xos", "Zoom"),
+    ("com.microsoft.teams", "Teams"),
+    ("com.apple.FaceTime", "FaceTime"),
+    ("com.apple.avconferenced", "FaceTime"),
+    ("com.hnc.Discord", "Discord"),
+    ("com.granola.app", "Granola"),
 ]
+
+// The notice carries a button, which means a registered category: an action on
+// a notification posted without one is silently dropped by macOS.
+let meetingCategoryID = "meeting-detected"
+let meetingOverrideActionID = "meeting-notify-anyway"
 
 // The microphone opening for a moment is dictation or a notification chime, not
 // a meeting. Leaving needs a longer grace than joining, so a brief drop mid-call

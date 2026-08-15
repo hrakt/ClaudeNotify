@@ -24,6 +24,15 @@ extension AppDelegate {
 
         let center = UNUserNotificationCenter.current()
         center.delegate = self
+        center.setNotificationCategories([
+            UNNotificationCategory(
+                identifier: meetingCategoryID,
+                actions: [UNNotificationAction(identifier: meetingOverrideActionID,
+                                               title: "Notify Anyway",
+                                               options: [])],
+                intentIdentifiers: [],
+                options: []),
+        ])
         center.requestAuthorization(options: [.alert]) { [weak self] granted, error in
             NSLog("ClaudeNotify: notification authorization granted=\(granted) error=\(error?.localizedDescription ?? "none")")
             DispatchQueue.main.async { self?.recordNotificationPermission(granted) }

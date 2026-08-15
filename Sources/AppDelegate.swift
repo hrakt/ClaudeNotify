@@ -23,6 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     var micLiveSince: Date?
     var micIdleSince: Date?
     var inMeeting = false
+    var meetingOverridden = false
+    var meetingNoticePosted = false
+    var meetingID = 0
     var loggedMeetingUnavailable = false
 
     var isPermanentlyMuted: Bool { FileManager.default.fileExists(atPath: flagURL.path) }

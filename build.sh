@@ -1,6 +1,6 @@
 #!/bin/bash
-# Builds ClaudeNotify.app — a tiny menu-bar app that toggles whether Claude Code
-# plays its completion sound. Re-run this any time you edit main.swift.
+# Builds ClaudeNotify.app — a tiny menu-bar app that controls how Claude Code
+# notifies you when a turn finishes. Re-run this any time you edit Sources/.
 set -euo pipefail
 cd "$(dirname "$0")"
 
