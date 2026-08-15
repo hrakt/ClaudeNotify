@@ -41,7 +41,7 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
         }
 
         let width: CGFloat = 540
-        let height: CGFloat = 560
+        let height: CGFloat = 584
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.titled, .closable, .miniaturizable],
@@ -69,8 +69,17 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
         content.addSubview(mute)
         settingsMuteCheckbox = mute
 
-        content.addSubview(label("Volume", NSRect(x: 20, y: height - 106, width: 120, height: 20)))
-        let volume = NSSlider(frame: NSRect(x: 150, y: height - 108, width: 300, height: 24))
+        let duck = NSButton(checkboxWithTitle: "Lower other audio while the sound plays",
+                            target: self,
+                            action: #selector(settingsDuckChanged(_:)))
+        duck.frame = NSRect(x: 20, y: height - 96, width: 380, height: 20)
+        duck.toolTip = "Dips music and video for the length of the notification, "
+            + "so it can be heard without being loud."
+        content.addSubview(duck)
+        settingsDuckCheckbox = duck
+
+        content.addSubview(label("Volume", NSRect(x: 20, y: height - 130, width: 120, height: 20)))
+        let volume = NSSlider(frame: NSRect(x: 150, y: height - 132, width: 300, height: 24))
         volume.minValue = 0.1
         volume.maxValue = 1.0
         volume.isContinuous = true
@@ -79,39 +88,39 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
         content.addSubview(volume)
         settingsVolumeSlider = volume
 
-        let volumeValue = label("", NSRect(x: 460, y: height - 106, width: 60, height: 20))
+        let volumeValue = label("", NSRect(x: 460, y: height - 130, width: 60, height: 20))
         content.addSubview(volumeValue)
         settingsVolumeLabel = volumeValue
 
-        content.addSubview(label("Remind me again", NSRect(x: 20, y: height - 144, width: 130, height: 20)))
-        let cadence = NSPopUpButton(frame: NSRect(x: 150, y: height - 148, width: 200, height: 26))
+        content.addSubview(label("Remind me again", NSRect(x: 20, y: height - 168, width: 130, height: 20)))
+        let cadence = NSPopUpButton(frame: NSRect(x: 150, y: height - 172, width: 200, height: 26))
         for choice in reminderChoices { cadence.addItem(withTitle: choice.title) }
         cadence.target = self
         cadence.action = #selector(settingsCadenceChanged(_:))
         content.addSubview(cadence)
         settingsCadencePopup = cadence
 
-        content.addSubview(label("Repeats", NSRect(x: 20, y: height - 182, width: 130, height: 20)))
-        let repeats = NSPopUpButton(frame: NSRect(x: 150, y: height - 186, width: 200, height: 26))
+        content.addSubview(label("Repeats", NSRect(x: 20, y: height - 206, width: 130, height: 20)))
+        let repeats = NSPopUpButton(frame: NSRect(x: 150, y: height - 210, width: 200, height: 26))
         for choice in reminderLimitChoices { repeats.addItem(withTitle: choice.title) }
         repeats.target = self
         repeats.action = #selector(settingsRepeatsChanged(_:))
         content.addSubview(repeats)
         settingsRepeatsPopup = repeats
 
-        let divider = NSBox(frame: NSRect(x: 20, y: height - 208, width: width - 40, height: 1))
+        let divider = NSBox(frame: NSRect(x: 20, y: height - 232, width: width - 40, height: 1))
         divider.boxType = .separator
         content.addSubview(divider)
 
-        content.addSubview(label("Notification sound", NSRect(x: 20, y: height - 240, width: 250, height: 18), bold: true))
+        content.addSubview(label("Notification sound", NSRect(x: 20, y: height - 264, width: 250, height: 18), bold: true))
 
-        let search = NSSearchField(frame: NSRect(x: 20, y: height - 274, width: width - 40, height: 24))
+        let search = NSSearchField(frame: NSRect(x: 20, y: height - 298, width: width - 40, height: 24))
         search.placeholderString = "Search sounds"
         search.target = self
         search.action = #selector(settingsSearchChanged(_:))
         content.addSubview(search)
 
-        let scroll = NSScrollView(frame: NSRect(x: 20, y: 60, width: width - 40, height: height - 346))
+        let scroll = NSScrollView(frame: NSRect(x: 20, y: 60, width: width - 40, height: height - 370))
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
 
@@ -153,6 +162,10 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
         soundTable?.reloadData()
 
         settingsMuteCheckbox?.state = isMuted ? .on : .off
+        settingsDuckCheckbox?.state = duckOtherAudio ? .on : .off
+        // Nothing to offer if macOS has stopped providing the call at all, and a
+        // tickable box that does nothing is worse than a greyed-out one.
+        settingsDuckCheckbox?.isEnabled = audioDeviceDuck != nil
         settingsVolumeSlider?.doubleValue = currentVolume
         settingsVolumeLabel?.stringValue = "\(Int((currentVolume * 100).rounded()))%"
 
@@ -180,6 +193,19 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
             try? fm.removeItem(at: mutedUntilURL)
         }
         updateUI()
+    }
+
+    @objc func settingsDuckChanged(_ sender: NSButton) {
+        try? (sender.state == .on ? "1" : "0")
+            .write(to: duckAudioURL, atomically: true, encoding: .utf8)
+
+        // Turning it off while a dip is in progress has to put the level back,
+        // or the setting that stops it lowering audio leaves audio lowered.
+        if sender.state == .off { restoreOtherAudio() }
+
+        // Preview it the way it will actually happen, which is the only way to
+        // judge whether the dip is worth having.
+        playLoweringOthers(selectedSound)
     }
 
     @objc func settingsVolumeChanged(_ sender: NSSlider) {

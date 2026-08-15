@@ -23,6 +23,7 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/terminals/  which terminal app each session runs in, and its tab handle
 ~/.claude/claudenotify/reminder-minutes  nag cadence in minutes, 0 = off
 ~/.claude/claudenotify/reminder-limit    how many repeats before giving up, 0 = unlimited
+~/.claude/claudenotify/duck-audio  0 disables lowering other audio, absent or 1 enables it
 ~/.claude/claudenotify/in-meeting  raised by the app while a meeting app holds the mic
 ~/.claude/claudenotify/quiet-in-meetings  0 disables meeting detection, absent or 1 enables it
 ~/.claude/claudenotify/force-meeting  create it to fake a meeting, delete it to end one
@@ -112,7 +113,7 @@ The menu holds:
 
 **Settings…** (⌘,) opens a window for the global settings, since a menu is a poor place to compare options or browse a hundred sounds:
 
-- Mute, volume, reminder cadence and repeat cap, all in one view rather than spread across submenus
+- Mute, lowering other audio, volume, reminder cadence and repeat cap, all in one view rather than spread across submenus
 - Every sound on the machine in one searchable list, with the source of each (System, Alert Tones, Interface Sounds, Yours) beside it. Clicking one selects and previews it, and the list opens scrolled to the current choice
 - Add Sound and Reveal Sounds Folder
 
@@ -178,6 +179,27 @@ The other terminals raise the app only, because none of them expose a way in: Wa
 Route 1 needs macOS to grant ClaudeNotify notification permission. On this machine it reports `authorizationStatus = denied` with "Notifications are not allowed for this application", which an ad-hoc signed app gets by default. Because the status is *denied* rather than *not determined*, the app should be listed in System Settings under Notifications, where switching it on restores route 1, and with it the clickable banner and this app's own icon in place of Script Editor's. When the app is refused it writes `notifications-blocked`, and the script uses route 2 instead. So a refusal costs the click and the styling, never the notification itself. Delete that file if you later sign the app properly and want to retry.
 
 The label text is stripped to letters, digits and simple punctuation before being interpolated into the AppleScript, so a session title cannot inject commands.
+
+### Lowering other audio instead of shouting over it
+
+A notification competing with music has two ways to be heard, and the obvious one is wrong. Turning the ding up means picking a volume that beats the loudest thing you might ever be playing, which makes it painful every other time. So the music moves instead: everything else dips to **70%** for the length of the ding, ramped over 200ms so it reads as a dip rather than a dropout, and the ding itself stays at whatever volume you set.
+
+The dip is deliberately shallow. A quarter volume — about -12dB, the first thing tried here — stops a song dead and makes the dip itself the startling part, which is no better than the loud ding it replaced. 70% is roughly -3dB: enough headroom for a chime to sit in, while leaving you where you were in whatever you were listening to. It is one constant, `duckedLevel` in `Sources/Support.swift`, if it wants adjusting.
+
+On by default. **Settings → Lower other audio while the sound plays** turns it off, and ticking it plays the current sound the way it will actually happen, since that is the only way to judge whether the dip is worth having.
+
+This uses `AudioDeviceDuck`, which is how Siri and VoiceOver dip your music while they talk. macOS ships it but does not declare it in any public header, so it is looked up by symbol at runtime rather than linked against. If a future macOS removes it the lookup fails, the checkbox greys out, and the ding still plays — it just stops getting out of the way.
+
+**One consequence worth knowing.** Ducking has to be done by whatever plays the sound, or it dips that sound too. `afplay` in the hook is a separate process, so when ducking is on the **app** plays the completion ding and the hook stays out of it. Both sides test the same file, so exactly one of them ever plays:
+
+| ducking | who plays the ding |
+|---|---|
+| on, app running | the app, with other audio dipped |
+| off, or app not running | the hook, exactly as before |
+
+The practical cost is that with ducking on, the ding depends on the app running — the same dependency the clickable banner already has. Turn ducking off and the hook plays it unconditionally again.
+
+The dip is undone when the sound finishes, when the app quits, and when the setting is switched off. Any of those going missing would leave every other app at a quarter volume with nothing on screen to explain it, which is a much worse failure than not ducking at all.
 
 ### Staying quiet during meetings
 

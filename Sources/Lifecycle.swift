@@ -81,6 +81,16 @@ extension AppDelegate {
         try? fm.createDirectory(at: terminalsDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: deferredDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: pendingDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: pendingSoundDir, withIntermediateDirectories: true)
+
+        // If macOS no longer offers the ducking call, the preference is written
+        // off rather than merely greyed out in Settings. The hook reads that
+        // file to decide whether to stand aside, and it cannot check for the
+        // symbol itself — left on, it would keep handing the ding to an app that
+        // can no longer do anything special with it, with no way to take it back.
+        if audioDeviceDuck == nil, duckOtherAudio {
+            try? "0".write(to: duckAudioURL, atomically: true, encoding: .utf8)
+        }
 
         // The app owns this flag. Left behind by a crash or a force quit it
         // would silence every ding until the next meeting ended, so launching
@@ -169,6 +179,10 @@ extension AppDelegate {
     // guard, but it keeps the on-disk state honest.
     func applicationWillTerminate(_ notification: Notification) {
         try? FileManager.default.removeItem(at: inMeetingURL)
+        // Quitting mid-ding would otherwise leave every other app at a quarter
+        // volume, with nothing on screen to explain it and no way to undo it
+        // short of relaunching this app.
+        restoreOtherAudio(ramp: 0)
     }
 
     @objc func quit() { NSApp.terminate(nil) }

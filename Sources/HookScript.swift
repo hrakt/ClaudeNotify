@@ -129,6 +129,23 @@ if [ -n "$APP_RUNNING" ] && [ -f "$HOME/.claude/claudenotify/in-meeting" ]; then
     QUIET=1
 fi
 
+# Lowering other audio has to be done by whatever plays the sound, or it lowers
+# the sound too. afplay here is a separate process, so when ducking is on the
+# app plays the ding instead and this script stays out of it. Both sides test
+# the same file, so exactly one of them plays.
+#
+# The session id is required because the hand-off below is keyed by it: without
+# one there is nothing for the app to act on, so standing aside here would mean
+# no sound from either side.
+DUCK=""
+if [ -n "$APP_RUNNING" ] && [ -n "$SESSION_ID" ]; then
+    DUCK=1
+    DUCK_PREF="$HOME/.claude/claudenotify/duck-audio"
+    if [ -f "$DUCK_PREF" ] && [ "$(cat "$DUCK_PREF" 2>/dev/null)" = "0" ]; then
+        DUCK=""
+    fi
+fi
+
 SOUND="/System/Library/Sounds/Glass.aiff"
 POINTER="$HOME/.claude/claudenotify/sound"
 if [ -f "$POINTER" ]; then
@@ -169,7 +186,7 @@ if [ -n "$SESSION_ID" ]; then
     fi
 fi
 
-if [ -z "$QUIET" ]; then
+if [ -z "$QUIET" ] && [ -z "$DUCK" ]; then
     afplay -v "$VOLUME" "$SOUND" 2>/dev/null
 fi
 
@@ -224,8 +241,18 @@ fi
 # own plain banner when it comes to post the summary, so deferring loses the
 # styling rather than the notification.
 if [ -n "$SESSION_ID" ] && [ -n "$APP_RUNNING" ] \\
-    && { [ -n "$QUIET" ] \\
+    && { [ -n "$QUIET" ] || [ -n "$DUCK" ] \\
         || [ ! -f "$HOME/.claude/claudenotify/notifications-blocked" ]; }; then
+    # Whether this script played the ding is recorded rather than left for the
+    # app to work out again from the preference file. Between the read above and
+    # the hand-off below sits a transcript read and possibly a spoken name, and a
+    # preference toggled in that window would otherwise mean both sides play or
+    # neither does. The marker is written first, since the app acts the moment
+    # the pending file appears.
+    if [ -n "$DUCK" ] && [ -z "$QUIET" ]; then
+        mkdir -p "$HOME/.claude/claudenotify/pending-sound" 2>/dev/null
+        : > "$HOME/.claude/claudenotify/pending-sound/$SESSION_ID"
+    fi
     mkdir -p "$HOME/.claude/claudenotify/pending" 2>/dev/null
     printf '%s' "$SESSION_LABEL" > "$HOME/.claude/claudenotify/pending/$SESSION_ID"
 elif [ -z "$QUIET" ]; then

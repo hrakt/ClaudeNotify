@@ -42,6 +42,20 @@ extension AppDelegate {
             let label = (try? String(contentsOf: file, encoding: .utf8))?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
+            // The hook leaves this when it has deliberately not played the ding.
+            let owed = pendingSoundDir.appendingPathComponent(sessionID)
+            let owesSound = fm.fileExists(atPath: owed.path)
+            try? fm.removeItem(at: owed)
+
+            // Draining also happens at launch, where the queue may hold whatever
+            // a force quit left behind. Replaying those is worse than losing
+            // them: a ding for work that finished yesterday, and one that
+            // arrives while the bell says muted, since the mute is enforced in
+            // the hook and the hook is long gone for a file already written.
+            let written = (try? file.resourceValues(forKeys: [.contentModificationDateKey])
+                .contentModificationDate) ?? Date()
+            let stale = Date().timeIntervalSince(written) > liveStaleWindow
+
             // Held rather than posted: a banner during a call is the thing being
             // avoided, and one summary afterwards says the same thing better.
             // Keyed by session id, so a session finishing twice is held once.
@@ -54,6 +68,13 @@ extension AppDelegate {
             }
 
             try? fm.removeItem(at: file)
+            guard !stale else { continue }
+
+            if owesSound, !isMuted {
+                playLoweringOthers(assignedSound(for: sessionID) ?? selectedSound,
+                                   volume: sessionVolume(for: sessionID))
+            }
+
             postFinishedNotification(for: sessionID, label: label)
         }
     }
@@ -247,8 +268,8 @@ extension AppDelegate {
                 for: session.id,
                 label: "\(session.project) · \(session.title)",
                 reminder: "Waiting \(waiting) minutes")
-            play(assignedSound(for: session.id) ?? selectedSound,
-                 volume: sessionVolume(for: session.id))
+            playLoweringOthers(assignedSound(for: session.id) ?? selectedSound,
+                               volume: sessionVolume(for: session.id))
         }
     }
 

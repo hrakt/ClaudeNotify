@@ -20,6 +20,11 @@ let terminalsDir = supportDir.appendingPathComponent("terminals")
 // osascript belong to Script Editor and ignore clicks. So it drops a file here
 // and the app, which can handle a click, posts the banner.
 let pendingDir = supportDir.appendingPathComponent("pending")
+
+// The hook records here that it stood aside and the app owes a ding, rather
+// than both sides re-deriving it from the preference and disagreeing if it
+// changed in between.
+let pendingSoundDir = supportDir.appendingPathComponent("pending-sound")
 let notificationsBlockedURL = supportDir.appendingPathComponent("notifications-blocked")
 
 // A meeting is the microphone being live, which is one signal covering Meet,
@@ -29,6 +34,21 @@ let notificationsBlockedURL = supportDir.appendingPathComponent("notifications-b
 let inMeetingURL = supportDir.appendingPathComponent("in-meeting")
 let quietInMeetingsURL = supportDir.appendingPathComponent("quiet-in-meetings")
 let forceMeetingURL = supportDir.appendingPathComponent("force-meeting")
+
+// Ducking: dip whatever else is playing for the length of the ding, so the ding
+// can stay at a civil volume and still be heard over music. Raising the ding
+// instead is the obvious alternative and the wrong one — it has to beat the
+// loudest thing you might be listening to, which makes it painful the rest of
+// the time.
+let duckAudioURL = supportDir.appendingPathComponent("duck-audio")
+
+// Deliberately shallow. A quarter volume is roughly -12dB, which is enough to
+// stop a song dead and makes the dip itself the startling part — worse than the
+// loud ding it was meant to replace. 0.7 is about -3dB: audible headroom for a
+// chime, and on the far side of it you have not lost your place in what you
+// were listening to. The ramp keeps it from reading as a dropout.
+let duckedLevel: Float32 = 0.7
+let duckRamp: Float32 = 0.2
 
 // Banners raised during a meeting are held here rather than dropped, so walking
 // out of a call tells you what finished while you were in it.

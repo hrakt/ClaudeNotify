@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     var settingsVolumeSlider: NSSlider?
     var settingsVolumeLabel: NSTextField?
     var settingsMuteCheckbox: NSButton?
+    var settingsDuckCheckbox: NSButton?
     var settingsCadencePopup: NSPopUpButton?
     var settingsRepeatsPopup: NSPopUpButton?
     var lastReminded: [String: Date] = [:]
@@ -31,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     var audioListeners: [(AudioDeviceID, AudioObjectPropertyListenerBlock)] = []
     var meetingCheckTimer: Timer?
     var forcedMeetingWatcher: DispatchSourceFileSystemObject?
+    var duckGeneration = 0
+    var duckedDevice: AudioDeviceID?
 
     var isPermanentlyMuted: Bool { FileManager.default.fileExists(atPath: flagURL.path) }
 
