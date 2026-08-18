@@ -74,12 +74,19 @@ Launching the app creates `~/.claude/claudenotify/` and writes `notify.sh`. Then
           { "type": "command", "command": "~/.claude/claudenotify/notify.sh" }
         ]
       }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          { "type": "command", "command": "~/.claude/claudenotify/notify.sh" }
+        ]
+      }
     ]
   }
 }
 ```
 
-All three point at the same script, which branches on the `hook_event_name` in the payload. `Stop` is the one that makes noise; `SessionStart` and `SessionEnd` are silent and exist only to keep the session list accurate. `Stop` alone is enough if you don't care about per-session sounds.
+All four point at the same script, which branches on the `hook_event_name` in the payload. `Stop` makes noise when a turn ends and `Notification` makes a different noise when Claude is blocked waiting on you; `SessionStart` and `SessionEnd` are silent and exist only to keep the session list accurate. `Stop` alone is enough if you don't care about per-session sounds.
 
 To check your setup without waiting on Claude, run the script directly:
 
