@@ -28,7 +28,9 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/quiet-in-meetings  0 disables meeting detection, absent or 1 enables it
 ~/.claude/claudenotify/force-meeting  create it to fake a meeting, delete it to end one
 ~/.claude/claudenotify/deferred/   banners held during a meeting, summarised when it ends
+~/.claude/claudenotify/sound-attention  one line: sound for "Claude needs you", defaults to Submarine
 ~/.claude/claudenotify/pending/    banner handoff: script drops a session id, app posts it
+~/.claude/claudenotify/pending-meta/ which event it was, and whether the app owes the ding
 ~/.claude/claudenotify/notifications-blocked  written when macOS refuses the app permission
 ```
 
@@ -179,6 +181,29 @@ The other terminals raise the app only, because none of them expose a way in: Wa
 Route 1 needs macOS to grant ClaudeNotify notification permission. On this machine it reports `authorizationStatus = denied` with "Notifications are not allowed for this application", which an ad-hoc signed app gets by default. Because the status is *denied* rather than *not determined*, the app should be listed in System Settings under Notifications, where switching it on restores route 1, and with it the clickable banner and this app's own icon in place of Script Editor's. When the app is refused it writes `notifications-blocked`, and the script uses route 2 instead. So a refusal costs the click and the styling, never the notification itself. Delete that file if you later sign the app properly and want to retry.
 
 The label text is stripped to letters, digits and simple punctuation before being interpolated into the AppleScript, so a session title cannot inject commands.
+
+### Being blocked on you is not the same as finishing
+
+`Stop` fires every time a turn ends. With several sessions running that is most of the day, and a notification that fires constantly is one you learn to ignore — or mute outright.
+
+`Notification` is different: Claude Code fires it when it is **blocked on you**, waiting for a permission decision or for input on a turn that has sat idle. That is the one worth interrupting for, so it sounds different and says so:
+
+> **Claude needs you**
+> cam-fe · SMART-6273 applicant-phone-number
+
+It gets **Submarine** rather than the usual Glass, so the two are distinguishable without looking. Point `sound-attention` at any file to change it.
+
+A **per-session sound still wins** over both. That was chosen to tell one session from another, which is the more specific thing to be saying, so it is not overridden.
+
+Register it alongside the others in `settings.json`:
+
+```json
+"Notification": [
+  { "hooks": [ { "type": "command", "command": "~/.claude/claudenotify/notify.sh" } ] }
+]
+```
+
+Without that entry the event never fires and everything keeps working as before — the script has always accepted the event, it just had nothing to tell apart.
 
 ### Lowering other audio instead of shouting over it
 

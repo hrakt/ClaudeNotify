@@ -42,10 +42,15 @@ extension AppDelegate {
             let label = (try? String(contentsOf: file, encoding: .utf8))?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // The hook leaves this when it has deliberately not played the ding.
-            let owed = pendingSoundDir.appendingPathComponent(sessionID)
-            let owesSound = fm.fileExists(atPath: owed.path)
-            try? fm.removeItem(at: owed)
+            // What the hook knew: which event this was, and whether it stood
+            // aside and so owes a ding.
+            let meta = pendingMetaDir.appendingPathComponent(sessionID)
+            let lines = ((try? String(contentsOf: meta, encoding: .utf8)) ?? "")
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            let owesSound = lines.count > 1 && lines[1] == "owed"
+            let needsYou = lines.first == "Notification"
+            try? fm.removeItem(at: meta)
 
             // Draining also happens at launch, where the queue may hold whatever
             // a force quit left behind. Replaying those is worse than losing
@@ -71,15 +76,22 @@ extension AppDelegate {
             guard !stale else { continue }
 
             if owesSound, !isMuted {
-                playLoweringOthers(assignedSound(for: sessionID) ?? selectedSound,
-                                   volume: sessionVolume(for: sessionID))
+                // A per-session sound still wins over the attention sound: it
+                // was chosen to tell sessions apart, which is the more specific
+                // thing to be saying.
+                let sound = assignedSound(for: sessionID)
+                    ?? (needsYou ? attentionSound : selectedSound)
+                playLoweringOthers(sound, volume: sessionVolume(for: sessionID))
             }
 
-            postFinishedNotification(for: sessionID, label: label)
+            postFinishedNotification(for: sessionID, label: label, needsYou: needsYou)
         }
     }
 
-    func postFinishedNotification(for sessionID: String, label: String? = nil, reminder: String? = nil) {
+    func postFinishedNotification(for sessionID: String,
+                                  label: String? = nil,
+                                  reminder: String? = nil,
+                                  needsYou: Bool = false) {
         let resolved = (label?.isEmpty == false) ? label! : describeSession(sessionID)
 
         // The body promises only what the click can deliver: an unknown
@@ -97,7 +109,8 @@ extension AppDelegate {
         }
 
         deliver(sessionID: sessionID,
-                title: reminder == nil ? "Claude finished" : "Claude still waiting",
+                title: needsYou ? "Claude needs you"
+                    : (reminder == nil ? "Claude finished" : "Claude still waiting"),
                 subtitle: resolved,
                 body: reminder.map { "\($0). \(destination)" } ?? destination,
                 fallbackSubtitle: resolved,

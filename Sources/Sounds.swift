@@ -131,6 +131,17 @@ extension AppDelegate {
         play(selectedSound)
     }
 
+    var attentionSound: URL {
+        guard let raw = try? String(contentsOf: attentionSoundPointerURL, encoding: .utf8) else {
+            return defaultAttentionSound
+        }
+        let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else {
+            return defaultAttentionSound
+        }
+        return URL(fileURLWithPath: path)
+    }
+
     var duckOtherAudio: Bool {
         guard let raw = try? String(contentsOf: duckAudioURL, encoding: .utf8) else { return true }
         return raw.trimmingCharacters(in: .whitespacesAndNewlines) != "0"

@@ -186,6 +186,21 @@ if [ -n "$SESSION_ID" ]; then
     fi
 fi
 
+# Being blocked on you is not the same event as a turn ending, and with several
+# sessions running it is the one worth interrupting for, so it sounds different.
+# A per-session sound still wins: that was set to tell sessions apart, which is
+# the more specific thing to be saying.
+if [ "$EVENT" = "Notification" ] && [ -z "$CHOSEN_SESSION" ]; then
+    SOUND="/System/Library/Sounds/Submarine.aiff"
+    ATTENTION_POINTER="$HOME/.claude/claudenotify/sound-attention"
+    if [ -f "$ATTENTION_POINTER" ]; then
+        CHOSEN_ATTENTION="$(cat "$ATTENTION_POINTER")"
+        if [ -n "$CHOSEN_ATTENTION" ] && [ -f "$CHOSEN_ATTENTION" ]; then
+            SOUND="$CHOSEN_ATTENTION"
+        fi
+    fi
+fi
+
 if [ -z "$QUIET" ] && [ -z "$DUCK" ]; then
     afplay -v "$VOLUME" "$SOUND" 2>/dev/null
 fi
@@ -249,10 +264,13 @@ if [ -n "$SESSION_ID" ] && [ -n "$APP_RUNNING" ] \\
     # preference toggled in that window would otherwise mean both sides play or
     # neither does. The marker is written first, since the app acts the moment
     # the pending file appears.
+    OWED=""
     if [ -n "$DUCK" ] && [ -z "$QUIET" ]; then
-        mkdir -p "$HOME/.claude/claudenotify/pending-sound" 2>/dev/null
-        : > "$HOME/.claude/claudenotify/pending-sound/$SESSION_ID"
+        OWED="owed"
     fi
+    mkdir -p "$HOME/.claude/claudenotify/pending-meta" 2>/dev/null
+    printf '%s\\n%s\\n' "$EVENT" "$OWED" \\
+        > "$HOME/.claude/claudenotify/pending-meta/$SESSION_ID"
     mkdir -p "$HOME/.claude/claudenotify/pending" 2>/dev/null
     printf '%s' "$SESSION_LABEL" > "$HOME/.claude/claudenotify/pending/$SESSION_ID"
 elif [ -z "$QUIET" ]; then

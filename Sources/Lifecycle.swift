@@ -81,7 +81,7 @@ extension AppDelegate {
         try? fm.createDirectory(at: terminalsDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: deferredDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: pendingDir, withIntermediateDirectories: true)
-        try? fm.createDirectory(at: pendingSoundDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: pendingMetaDir, withIntermediateDirectories: true)
 
         // If macOS no longer offers the ducking call, the preference is written
         // off rather than merely greyed out in Settings. The hook reads that

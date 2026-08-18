@@ -21,10 +21,18 @@ let terminalsDir = supportDir.appendingPathComponent("terminals")
 // and the app, which can handle a click, posts the banner.
 let pendingDir = supportDir.appendingPathComponent("pending")
 
-// The hook records here that it stood aside and the app owes a ding, rather
-// than both sides re-deriving it from the preference and disagreeing if it
-// changed in between.
-let pendingSoundDir = supportDir.appendingPathComponent("pending-sound")
+// What the hook knew and the app cannot work out for itself: which event this
+// was, and whether the hook stood aside and so owes the app a ding. Both are
+// recorded rather than re-derived, since the preference can change between the
+// hook reading it and the app acting on it.
+let pendingMetaDir = supportDir.appendingPathComponent("pending-meta")
+
+// Claude Code fires Notification when it is blocked on you — a permission
+// prompt, or a turn that has sat waiting. That is a different thing from a turn
+// ending, and with several sessions running it is the one worth interrupting
+// for, so it gets its own sound and its own wording.
+let attentionSoundPointerURL = supportDir.appendingPathComponent("sound-attention")
+let defaultAttentionSound = systemSoundsDir.appendingPathComponent("Submarine.aiff")
 let notificationsBlockedURL = supportDir.appendingPathComponent("notifications-blocked")
 
 // A meeting is the microphone being live, which is one signal covering Meet,
