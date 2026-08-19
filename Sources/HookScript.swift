@@ -155,7 +155,7 @@ if [ -n "$APP_RUNNING" ] && [ -n "$SESSION_ID" ]; then
     fi
 fi
 
-SOUND="/System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/EncoreInfinitum/Droplet-EncoreInfinitum.caf"
+SOUND="/System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/EncoreInfinitum/Passage-EncoreInfinitum.caf"
 POINTER="$HOME/.claude/claudenotify/sound"
 if [ -f "$POINTER" ]; then
     CHOSEN="$(cat "$POINTER")"
@@ -244,7 +244,7 @@ fi
 # playing it speaks too, so the two stay in the same order rather than the name
 # arriving before the sound that prompted it.
 if [ -z "$QUIET" ] && [ -z "$FOCUS" ] && [ -z "$DUCK" ] && [ -n "$PROJECT" ] \
-    && [ "$(cat "$HOME/.claude/claudenotify/speak-project" 2>/dev/null)" != "0" ]; then
+    && [ "$(cat "$HOME/.claude/claudenotify/speak-project" 2>/dev/null)" = "1" ]; then
     # The separators are reordered so the argument does not begin with a dash,
     # which tr reads as the start of an option rather than a character to map.
     SPOKEN="$(printf '%s' "$PROJECT" | tr '_-' '  ')"

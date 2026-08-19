@@ -69,9 +69,12 @@ extension AppDelegate {
 
     // MARK: - Announcing the project
 
+    // Off unless asked for. Spoken words cost more attention than a chime, and
+    // something that talks on every turn across several sessions should be
+    // opted into rather than discovered.
     var speakProject: Bool {
-        guard let raw = try? String(contentsOf: speakProjectURL, encoding: .utf8) else { return true }
-        return raw.trimmingCharacters(in: .whitespacesAndNewlines) != "0"
+        guard let raw = try? String(contentsOf: speakProjectURL, encoding: .utf8) else { return false }
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
     }
 
     @objc func toggleSpeakProject() {

@@ -209,11 +209,13 @@ let scriptURL = supportDir.appendingPathComponent("notify.sh")
 
 let systemSoundsDir = URL(fileURLWithPath: "/System/Library/Sounds")
 // Glass is the macOS default and sounds like an error to anyone who has used a
-// Mac for a decade. Droplet is one of the alert tones macOS ships but never
-// surfaces in System Settings: shorter, softer, and not already loaded with
-// meaning. It is only the default — the Sound menu still has all 101.
+// Mac for a decade. Passage is one of the alert tones macOS ships and never
+// surfaces in System Settings, chosen by measurement rather than taste: it
+// carries about 3.7x the energy of Droplet, which was the quietest tone on the
+// machine and kept going unnoticed, while opening gently enough not to stab.
+// It is only the default — the Sound menu still has all 101.
 let defaultSound = URL(fileURLWithPath: "/System/Library/PrivateFrameworks/ToneLibrary.framework"
-    + "/Versions/A/Resources/AlertTones/EncoreInfinitum/Droplet-EncoreInfinitum.caf")
+    + "/Versions/A/Resources/AlertTones/EncoreInfinitum/Passage-EncoreInfinitum.caf")
 let audioExtensions: Set<String> = ["aiff", "aif", "wav", "mp3", "m4a", "caf", "aac"]
 
 // Sounds macOS ships but never surfaces in System Settings. Browsing them keeps

@@ -110,7 +110,7 @@ The menu holds:
 - **Mute For** silences it for 15 minutes, 30 minutes, or an hour, then turns the sound back on by itself. While a timer is running the menu shows how long is left, and clicking the bell or the mute item ends it early. The deadline is a timestamp on disk that the script checks and deletes once it passes, so the sound comes back even if the app isn't running.
 - **Sound** lists every sound on the machine, with the current one check-marked. Picking one previews it immediately.
   - The 14 familiar system sounds (Glass, Ping, Hero…) sit at the top level.
-  - **Alert Tones** holds 19 more that macOS ships but never exposes in System Settings: Droplet, Portal, Milestone, Cheers, Rebound, Handoff, Welcome, and the tapback sounds.
+  - **Alert Tones** holds 19 more that macOS ships but never exposes in System Settings: Droplet, Passage, Portal, Milestone, Cheers, Rebound, Handoff, Welcome, and the tapback sounds.
   - **Interface Sounds** holds 68 more, grouped as macOS groups them: `siri`, `dock`, `finder`, `system`, `facetime`, `telephony`, `accessibility`, `ink`.
   - Anything you've imported appears below those.
 - **Sound → Add Sound…** copies audio files (aiff, wav, mp3, m4a, caf, aac) into `~/.claude/claudenotify/sounds/` and selects the last one added. Name collisions get numbered rather than overwriting.
@@ -118,7 +118,7 @@ The menu holds:
 - **Sessions** lists your recent Claude Code sessions by name, so you can tell parallel work apart by ear. Open a session's submenu and choose **Use Current Sound** to give it the sound you currently have selected. Each session also gets its own **volume slider**, useful for turning a chatty background session down without losing the one you care about. A session with no override follows the global volume, and the submenu says which is in effect. **Clear Session Settings** drops both the sound and the volume override. A check mark on the session means it has its own sound.
 - **Remind Me Again** re-notifies about a session that finished and is still sitting there untouched: every 2, 5, 10 or 30 minutes, or hourly. **Off by default.** A session stops being reminded the moment anything touches it, when it ends, and while you are muted.
   - **Remind Me Again → Repeats** caps how many times one session may nag before it gives up: 3, 6 (the default), 12, or unlimited. Six at a ten minute cadence means a session you abandon goes quiet after an hour rather than all afternoon. The count resets as soon as the session is touched.
-- **Speak Project Name** says which project just finished — "cam F E", "cam A P I" — after the chime. On by default; one click turns it off. See [Saying which project it was](#saying-which-project-it-was).
+- **Speak Project Name** says which project just finished — "cam F E", "cam A P I" — after the chime. **Off by default**, since spoken words cost more attention than a chime; one click turns it on. See [Saying which project it was](#saying-which-project-it-was).
 - **Quiet During Meetings** holds the sound and the banners while you are on a call, tells you it is doing so with a **Notify Anyway** button to overrule it, and says what finished once it ends. On by default. See [Staying quiet during meetings](#staying-quiet-during-meetings).
 - **Volume** is a slider from 10% to 100%. The percentage above it updates as you drag, and releasing the slider plays the current sound at the new level so you can hear what you picked. It applies to both the in-app preview and the real notification.
 - **Play Test Sound** plays the current selection at the current volume.
@@ -157,7 +157,7 @@ The chime tells you something finished. With work in several projects at once, t
 
 So the announcement says the **project**, not the session title. That is a deliberate narrowing: a title is a sentence — "Debug notifications not showing in Ghostty terminal" takes about three and a half seconds to read out, longer than the work of noticing a chime and glancing over. The project is the part that tells you where to look.
 
-It comes **after** the sound rather than instead of it, because the chime is what gets your attention and the name is what it then tells you.
+It comes **after** the sound rather than instead of it, because the chime is what gets your attention and the name is what it then tells you. **Off by default** — something that talks on every turn across several sessions is worth opting into rather than discovering.
 
 A folder name is not a phrase, so it is unpacked before speaking: separators become spaces, camel case is split, and the short pieces are spelled out, since in this kind of name they are initialisms rather than words.
 
