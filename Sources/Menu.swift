@@ -48,6 +48,13 @@ extension AppDelegate {
             menu.addItem(parent)
         }
 
+        let speak = NSMenuItem(title: "Speak Project Name",
+                               action: #selector(toggleSpeakProject),
+                               keyEquivalent: "")
+        speak.target = self
+        speak.state = speakProject ? .on : .off
+        menu.addItem(speak)
+
         let quiet = NSMenuItem(title: "Quiet During Meetings",
                                action: #selector(toggleQuietInMeetings),
                                keyEquivalent: "")
@@ -326,14 +333,6 @@ extension AppDelegate {
                 submenu.addItem(clear)
             }
 
-            let speak = NSMenuItem(title: "Speak Session Name",
-                                   action: #selector(toggleSpeakName(_:)),
-                                   keyEquivalent: "")
-            speak.target = self
-            speak.representedObject = session.id
-            speak.state = speaksName(session.id) ? .on : .off
-            submenu.addItem(speak)
-
             let preview = NSMenuItem(title: "Play This Session's Sound",
                                      action: #selector(playSessionSound(_:)),
                                      keyEquivalent: "")
@@ -371,36 +370,8 @@ extension AppDelegate {
              volume: sessionVolume(for: sessionID))
     }
 
-    func speaksName(_ sessionID: String) -> Bool {
-        FileManager.default.fileExists(atPath: speakDir.appendingPathComponent(sessionID).path)
-    }
 
-    @objc func toggleSpeakName(_ sender: NSMenuItem) {
-        guard let sessionID = sender.representedObject as? String else { return }
-        let fm = FileManager.default
-        let marker = speakDir.appendingPathComponent(sessionID)
 
-        if speaksName(sessionID) {
-            try? fm.removeItem(at: marker)
-            return
-        }
-
-        try? fm.createDirectory(at: speakDir, withIntermediateDirectories: true)
-        fm.createFile(atPath: marker.path, contents: nil)
-        speakPreview(for: sessionID)
-    }
-
-    func speakPreview(for sessionID: String) {
-        var spoken = "Claude"
-        if let transcript = transcriptURL(for: sessionID),
-           let title = lastJSONValue("aiTitle", in: tailText(of: transcript) ?? "") {
-            spoken = title
-        }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
-        process.arguments = ["-r", "220", spoken.replacingOccurrences(of: "-", with: " ") + " finished"]
-        try? process.run()
-    }
 
     func sessionVolumeItem(for sessionID: String, level: Double) -> NSMenuItem {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 26))

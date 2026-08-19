@@ -129,6 +129,15 @@ if [ -n "$APP_RUNNING" ] && [ -f "$HOME/.claude/claudenotify/in-meeting" ]; then
     QUIET=1
 fi
 
+# macOS hides banners under a Focus and has no say over afplay, so without this
+# the ding goes through Do Not Disturb untouched. The app works out the state and
+# leaves the flag, since reading it means parsing JSON. The banner is still
+# handed over: macOS holds those itself while a Focus is on.
+FOCUS=""
+if [ -n "$APP_RUNNING" ] && [ -f "$HOME/.claude/claudenotify/in-focus" ]; then
+    FOCUS=1
+fi
+
 # Lowering other audio has to be done by whatever plays the sound, or it lowers
 # the sound too. afplay here is a separate process, so when ducking is on the
 # app plays the ding instead and this script stays out of it. Both sides test
@@ -146,7 +155,7 @@ if [ -n "$APP_RUNNING" ] && [ -n "$SESSION_ID" ]; then
     fi
 fi
 
-SOUND="/System/Library/Sounds/Glass.aiff"
+SOUND="/System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/EncoreInfinitum/Droplet-EncoreInfinitum.caf"
 POINTER="$HOME/.claude/claudenotify/sound"
 if [ -f "$POINTER" ]; then
     CHOSEN="$(cat "$POINTER")"
@@ -201,7 +210,7 @@ if [ "$EVENT" = "Notification" ] && [ -z "$CHOSEN_SESSION" ]; then
     fi
 fi
 
-if [ -z "$QUIET" ] && [ -z "$DUCK" ]; then
+if [ -z "$QUIET" ] && [ -z "$FOCUS" ] && [ -z "$DUCK" ]; then
     afplay -v "$VOLUME" "$SOUND" 2>/dev/null
 fi
 
@@ -226,15 +235,19 @@ elif [ -n "$PROJECT" ]; then
     SESSION_LABEL="$PROJECT"
 fi
 
-# Speaking the session name is opt-in per session: hearing every session
-# announce itself all day is worse than a ding.
-if [ -z "$QUIET" ] && [ -n "$SESSION_ID" ] \\
-    && [ -f "$HOME/.claude/claudenotify/speak/$SESSION_ID" ]; then
-    SPOKEN="$SESSION_TITLE"
-    if [ -z "$SPOKEN" ]; then
-        SPOKEN="Claude"
-    fi
-    SPOKEN="$(printf '%s' "$SPOKEN" | tr '-' ' ')"
+# Which project just wanted you, rather than what it was doing. A session title
+# is a sentence and takes about three and a half seconds to read out, which is
+# longer than the work of noticing a chime; the project is the part that tells
+# you where to look. Off by default.
+#
+# Only spoken here when this script also played the ding. With the app doing the
+# playing it speaks too, so the two stay in the same order rather than the name
+# arriving before the sound that prompted it.
+if [ -z "$QUIET" ] && [ -z "$FOCUS" ] && [ -z "$DUCK" ] && [ -n "$PROJECT" ] \
+    && [ "$(cat "$HOME/.claude/claudenotify/speak-project" 2>/dev/null)" != "0" ]; then
+    # The separators are reordered so the argument does not begin with a dash,
+    # which tr reads as the start of an option rather than a character to map.
+    SPOKEN="$(printf '%s' "$PROJECT" | tr '_-' '  ')"
 
     # Two sessions finishing together would talk over each other, so whoever
     # gets the lock speaks and the other just dings.
@@ -243,7 +256,7 @@ if [ -z "$QUIET" ] && [ -n "$SESSION_ID" ] \\
         rmdir "$SPEAK_LOCK" 2>/dev/null
     fi
     if mkdir "$SPEAK_LOCK" 2>/dev/null; then
-        say -r 220 "$SPOKEN finished" 2>/dev/null
+        say -r 220 "$SPOKEN" 2>/dev/null
         rmdir "$SPEAK_LOCK" 2>/dev/null
     fi
 fi

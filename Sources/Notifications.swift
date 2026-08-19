@@ -75,13 +75,26 @@ extension AppDelegate {
             try? fm.removeItem(at: file)
             guard !stale else { continue }
 
-            if owesSound, !isMuted {
+            // A Focus costs the sound and the announcement, not the banner:
+            // macOS holds banners itself while one is on, and the ding is the
+            // half it has no say over.
+            if owesSound, !isMuted, !focusIsOn() {
                 // A per-session sound still wins over the attention sound: it
                 // was chosen to tell sessions apart, which is the more specific
                 // thing to be saying.
                 let sound = assignedSound(for: sessionID)
                     ?? (needsYou ? attentionSound : selectedSound)
                 playLoweringOthers(sound, volume: sessionVolume(for: sessionID))
+
+                // After the sound, not instead of it: the chime is what gets
+                // your attention and the name is what it then tells you.
+                if speakProject, let project = projectName(for: sessionID) {
+                    let delay = max(preview?.duration ?? 0, 0.3)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                        guard let self else { return }
+                        self.speak(self.spokenProject(project))
+                    }
+                }
             }
 
             postFinishedNotification(for: sessionID, label: label, needsYou: needsYou)

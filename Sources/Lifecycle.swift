@@ -20,7 +20,9 @@ extension AppDelegate {
         Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.updateUI()
             self?.checkReminders()
+            self?.refreshFocusFlag()
         }
+        refreshFocusFlag()
 
         let center = UNUserNotificationCenter.current()
         center.delegate = self
@@ -96,6 +98,9 @@ extension AppDelegate {
         // would silence every ding until the next meeting ended, so launching
         // clears it and detection puts it back within a poll if a call is live.
         try? fm.removeItem(at: inMeetingURL)
+        // Same reasoning: the app owns this one too, and one left by a crash
+        // would silence the hook until the next time a Focus happened to end.
+        try? fm.removeItem(at: inFocusURL)
 
         let existing = try? String(contentsOf: scriptURL, encoding: .utf8)
         if existing != scriptBody {

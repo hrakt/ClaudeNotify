@@ -2,7 +2,7 @@
 
 A tiny macOS menu-bar app that controls how [Claude Code](https://claude.com/claude-code) notifies you when a turn finishes: mute it with one click, or pick from the 101 sounds already on your Mac.
 
-Claude Code can run a **Stop hook** when a turn ends. That's great, until you're heads-down and every response dings, or you get tired of hearing Glass. ClaudeNotify puts a bell in the menu bar so you can mute, unmute, and change the sound without editing any config.
+Claude Code can run a **Stop hook** when a turn ends. That's great, until you're heads-down and every response dings, or you get tired of the same chime. ClaudeNotify puts a bell in the menu bar so you can mute, unmute, and change the sound without editing any config.
 
 ## How it works
 
@@ -18,7 +18,9 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/sounds/     sounds you've added
 ~/.claude/claudenotify/sessions/   one file per session id, holding its sound
 ~/.claude/claudenotify/session-volumes/  per-session volume overrides
-~/.claude/claudenotify/speak/      marker per session that should announce its name
+~/.claude/claudenotify/speak-project  0 disables saying the project name, absent or 1 enables it
+~/.claude/claudenotify/respect-focus  0 disables Focus awareness, absent or 1 enables it
+~/.claude/claudenotify/in-focus    raised by the app while a macOS Focus is on
 ~/.claude/claudenotify/ttys/       which tty each session runs on
 ~/.claude/claudenotify/terminals/  which terminal app each session runs in, and its tab handle
 ~/.claude/claudenotify/reminder-minutes  nag cadence in minutes, 0 = off
@@ -34,7 +36,7 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/notifications-blocked  written when macOS refuses the app permission
 ```
 
-When a turn ends, `notify.sh` checks the mute flag and exits if it's there. Otherwise it reads the chosen sound and volume, plays it with `afplay -v`, and posts a banner naming the session. Every read is defensive: an unset, empty, or stale sound falls back to `Glass.aiff`, and a volume that isn't a bare number falls back to `1`. A bad state degrades to a working ding rather than to silence or a shell error.
+When a turn ends, `notify.sh` checks the mute flag and exits if it's there. Otherwise it reads the chosen sound and volume, plays it with `afplay -v`, and posts a banner naming the session. Every read is defensive: an unset, empty, or stale sound falls back to the default tone, and a volume that isn't a bare number falls back to `1`. A bad state degrades to a working ding rather than to silence or a shell error.
 
 Because the hook only ever names the script, new features ship by rewriting the script. You edit `settings.json` exactly once, at install.
 
@@ -113,9 +115,10 @@ The menu holds:
   - Anything you've imported appears below those.
 - **Sound → Add Sound…** copies audio files (aiff, wav, mp3, m4a, caf, aac) into `~/.claude/claudenotify/sounds/` and selects the last one added. Name collisions get numbered rather than overwriting.
 - **Sound → Reveal Sounds Folder** opens that folder in Finder, for adding or deleting files by hand.
-- **Sessions** lists your recent Claude Code sessions by name, so you can tell parallel work apart by ear. Open a session's submenu and choose **Use Current Sound** to give it the sound you currently have selected. Each session also gets its own **volume slider**, useful for turning a chatty background session down without losing the one you care about. A session with no override follows the global volume, and the submenu says which is in effect. **Speak Session Name** makes that session announce itself out loud when it finishes, which removes the need to memorise which tone means which work. **Clear Session Settings** drops both the sound and the volume override. A check mark on the session means it has its own sound.
+- **Sessions** lists your recent Claude Code sessions by name, so you can tell parallel work apart by ear. Open a session's submenu and choose **Use Current Sound** to give it the sound you currently have selected. Each session also gets its own **volume slider**, useful for turning a chatty background session down without losing the one you care about. A session with no override follows the global volume, and the submenu says which is in effect. **Clear Session Settings** drops both the sound and the volume override. A check mark on the session means it has its own sound.
 - **Remind Me Again** re-notifies about a session that finished and is still sitting there untouched: every 2, 5, 10 or 30 minutes, or hourly. **Off by default.** A session stops being reminded the moment anything touches it, when it ends, and while you are muted.
   - **Remind Me Again → Repeats** caps how many times one session may nag before it gives up: 3, 6 (the default), 12, or unlimited. Six at a ten minute cadence means a session you abandon goes quiet after an hour rather than all afternoon. The count resets as soon as the session is touched.
+- **Speak Project Name** says which project just finished — "cam F E", "cam A P I" — after the chime. On by default; one click turns it off. See [Saying which project it was](#saying-which-project-it-was).
 - **Quiet During Meetings** holds the sound and the banners while you are on a call, tells you it is doing so with a **Notify Anyway** button to overrule it, and says what finished once it ends. On by default. See [Staying quiet during meetings](#staying-quiet-during-meetings).
 - **Volume** is a slider from 10% to 100%. The percentage above it updates as you drag, and releasing the slider plays the current sound at the new level so you can hear what you picked. It applies to both the in-app preview and the real notification.
 - **Play Test Sound** plays the current selection at the current volume.
@@ -148,13 +151,37 @@ A session killed outright, by closing the terminal or `kill -9`, never sends `Se
 
 Transcripts can reach tens of megabytes, so the app reads only the last 200KB of each rather than parsing the file. That keeps opening the menu at a few milliseconds instead of seconds.
 
-### Speaking session names
+### Saying which project it was
 
-With **Speak Session Name** ticked, the script reads the session's title from the transcript the hook payload points at, so it always says the current name, and speaks it with `say -r 220`.
+The chime tells you something finished. With work in several projects at once, the useful question is immediately *which*, and turning to look costs more than hearing it.
 
-Three things to expect. It is **opt-in per session**, because hearing every session announce itself all day is worse than a ding. A full title takes around **3.5 seconds** to speak against half a second for a chime, so it suits the one or two sessions you are actually waiting on. And if two speaking sessions finish at the same moment, a lock directory means one speaks and the other just dings, rather than both talking over each other; a lock older than two minutes is treated as stale and reclaimed.
+So the announcement says the **project**, not the session title. That is a deliberate narrowing: a title is a sentence — "Debug notifications not showing in Ghostty terminal" takes about three and a half seconds to read out, longer than the work of noticing a chime and glancing over. The project is the part that tells you where to look.
 
-Ticket numbers are read as numbers, so `SMART-6177` comes out as "smart six thousand one hundred seventy seven". It identifies the ticket fine, and spelling digits out individually would mangle every other number in a title.
+It comes **after** the sound rather than instead of it, because the chime is what gets your attention and the name is what it then tells you.
+
+A folder name is not a phrase, so it is unpacked before speaking: separators become spaces, camel case is split, and the short pieces are spelled out, since in this kind of name they are initialisms rather than words.
+
+| project | spoken |
+|---|---|
+| `cam-fe` | Cam F E |
+| `cam-api` | Cam A P I |
+| `cm-intranet` | C M intranet |
+| `ClaudeNotify` | Claude Notify |
+| `pomofocus-mac` | Pomofocus mac |
+
+Three-letter pieces are the ambiguous case — `api` is letters, `cam` and `web` are words — so those are looked up in a short list rather than guessed at. Anything two letters or shorter is assumed to be an initialism already.
+
+Two sessions finishing together would talk over each other, so whoever takes the lock speaks and the other just chimes.
+
+### Staying silent under a Focus
+
+macOS hides banners while a Focus is on and has **no say over `afplay`**, so the ding goes straight through Do Not Disturb. That is the half that actually interrupts, and this closes it.
+
+**It needs Full Disk Access, and it says so rather than pretending.** The active-Focus state is not exposed by any API that does not want a permission of its own: `INFocusStatusCenter` needs the `com.apple.developer.focus-status` entitlement, which an ad-hoc-signed app cannot carry — declaring it anyway makes the app refuse to launch at all (`Launchd job spawn failed`). What is left is the file the system keeps at `~/Library/DoNotDisturb/DB/Assertions.json`, which lives inside a TCC-protected directory.
+
+Without that access the checkbox in Settings is disabled and relabelled *needs Full Disk Access*, and the app logs once at launch saying the sound will play through a Focus. Nothing silently does nothing.
+
+The file is read at arm's length in any case: it is undocumented, so a missing file, unreadable JSON, or a changed shape all mean "not focused". Being wrong that way costs a ding you did not want; being wrong the other way costs silence you cannot explain. Its mere existence is not the answer either — it survives a Focus ending, holding an empty record list.
 
 ### The completion banner
 

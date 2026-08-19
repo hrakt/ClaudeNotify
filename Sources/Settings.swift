@@ -41,7 +41,7 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
         }
 
         let width: CGFloat = 540
-        let height: CGFloat = 584
+        let height: CGFloat = 608
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.titled, .closable, .miniaturizable],
@@ -78,8 +78,17 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
         content.addSubview(duck)
         settingsDuckCheckbox = duck
 
-        content.addSubview(label("Volume", NSRect(x: 20, y: height - 130, width: 120, height: 20)))
-        let volume = NSSlider(frame: NSRect(x: 150, y: height - 132, width: 300, height: 24))
+        let focus = NSButton(checkboxWithTitle: "Stay silent while a Focus is on",
+                             target: self,
+                             action: #selector(settingsFocusChanged(_:)))
+        focus.frame = NSRect(x: 20, y: height - 120, width: 380, height: 20)
+        focus.toolTip = "macOS already hides banners under a Focus but has no say over "
+            + "the sound. This silences that too."
+        content.addSubview(focus)
+        settingsFocusCheckbox = focus
+
+        content.addSubview(label("Volume", NSRect(x: 20, y: height - 154, width: 120, height: 20)))
+        let volume = NSSlider(frame: NSRect(x: 150, y: height - 156, width: 300, height: 24))
         volume.minValue = 0.1
         volume.maxValue = 1.0
         volume.isContinuous = true
@@ -88,39 +97,39 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
         content.addSubview(volume)
         settingsVolumeSlider = volume
 
-        let volumeValue = label("", NSRect(x: 460, y: height - 130, width: 60, height: 20))
+        let volumeValue = label("", NSRect(x: 460, y: height - 154, width: 60, height: 20))
         content.addSubview(volumeValue)
         settingsVolumeLabel = volumeValue
 
-        content.addSubview(label("Remind me again", NSRect(x: 20, y: height - 168, width: 130, height: 20)))
-        let cadence = NSPopUpButton(frame: NSRect(x: 150, y: height - 172, width: 200, height: 26))
+        content.addSubview(label("Remind me again", NSRect(x: 20, y: height - 192, width: 130, height: 20)))
+        let cadence = NSPopUpButton(frame: NSRect(x: 150, y: height - 196, width: 200, height: 26))
         for choice in reminderChoices { cadence.addItem(withTitle: choice.title) }
         cadence.target = self
         cadence.action = #selector(settingsCadenceChanged(_:))
         content.addSubview(cadence)
         settingsCadencePopup = cadence
 
-        content.addSubview(label("Repeats", NSRect(x: 20, y: height - 206, width: 130, height: 20)))
-        let repeats = NSPopUpButton(frame: NSRect(x: 150, y: height - 210, width: 200, height: 26))
+        content.addSubview(label("Repeats", NSRect(x: 20, y: height - 230, width: 130, height: 20)))
+        let repeats = NSPopUpButton(frame: NSRect(x: 150, y: height - 234, width: 200, height: 26))
         for choice in reminderLimitChoices { repeats.addItem(withTitle: choice.title) }
         repeats.target = self
         repeats.action = #selector(settingsRepeatsChanged(_:))
         content.addSubview(repeats)
         settingsRepeatsPopup = repeats
 
-        let divider = NSBox(frame: NSRect(x: 20, y: height - 232, width: width - 40, height: 1))
+        let divider = NSBox(frame: NSRect(x: 20, y: height - 256, width: width - 40, height: 1))
         divider.boxType = .separator
         content.addSubview(divider)
 
-        content.addSubview(label("Notification sound", NSRect(x: 20, y: height - 264, width: 250, height: 18), bold: true))
+        content.addSubview(label("Notification sound", NSRect(x: 20, y: height - 288, width: 250, height: 18), bold: true))
 
-        let search = NSSearchField(frame: NSRect(x: 20, y: height - 298, width: width - 40, height: 24))
+        let search = NSSearchField(frame: NSRect(x: 20, y: height - 322, width: width - 40, height: 24))
         search.placeholderString = "Search sounds"
         search.target = self
         search.action = #selector(settingsSearchChanged(_:))
         content.addSubview(search)
 
-        let scroll = NSScrollView(frame: NSRect(x: 20, y: 60, width: width - 40, height: height - 370))
+        let scroll = NSScrollView(frame: NSRect(x: 20, y: 60, width: width - 40, height: height - 394))
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
 
@@ -163,6 +172,14 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
 
         settingsMuteCheckbox?.state = isMuted ? .on : .off
         settingsDuckCheckbox?.state = duckOtherAudio ? .on : .off
+        // Offering a tick for something macOS will not let the app see would be
+        // a promise it cannot keep, so the box says why instead.
+        let canSeeFocus = focusIsReadable()
+        settingsFocusCheckbox?.state = (respectFocus && canSeeFocus) ? .on : .off
+        settingsFocusCheckbox?.isEnabled = canSeeFocus
+        settingsFocusCheckbox?.title = canSeeFocus
+            ? "Stay silent while a Focus is on"
+            : "Stay silent while a Focus is on — needs Full Disk Access"
         // Nothing to offer if macOS has stopped providing the call at all, and a
         // tickable box that does nothing is worse than a greyed-out one.
         settingsDuckCheckbox?.isEnabled = audioDeviceDuck != nil
@@ -206,6 +223,14 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
         // Preview it the way it will actually happen, which is the only way to
         // judge whether the dip is worth having.
         playLoweringOthers(selectedSound)
+    }
+
+    @objc func settingsFocusChanged(_ sender: NSButton) {
+        try? (sender.state == .on ? "1" : "0")
+            .write(to: respectFocusURL, atomically: true, encoding: .utf8)
+        // The hook reads a flag rather than the preference, so it has to be
+        // brought back in line straight away or the change waits for the timer.
+        refreshFocusFlag()
     }
 
     @objc func settingsVolumeChanged(_ sender: NSSlider) {

@@ -33,6 +33,31 @@ let pendingMetaDir = supportDir.appendingPathComponent("pending-meta")
 // for, so it gets its own sound and its own wording.
 let attentionSoundPointerURL = supportDir.appendingPathComponent("sound-attention")
 let defaultAttentionSound = systemSoundsDir.appendingPathComponent("Submarine.aiff")
+
+// Speaking the project rather than the session title. A title is a sentence —
+// "Debug notifications not showing in Ghostty terminal" takes about three and a
+// half seconds to read out, which is longer than the work of noticing a chime.
+// The project is the part you actually need: it says which of the things you
+// have running just wanted you.
+let speakProjectURL = supportDir.appendingPathComponent("speak-project")
+
+// Pieces of a project name that are initialisms rather than words, and so are
+// spelled out rather than pronounced. Anything two letters or shorter is
+// assumed to be one of these already; this is for the three-letter cases, where
+// "api" is letters but "cam" and "web" are words.
+let spokenAsLetters: Set<String> = [
+    "api", "cli", "sdk", "css", "sql", "cdn", "dns", "aws", "gcp", "ios",
+    "mvp", "poc", "crm", "cms", "erp", "pdf", "csv", "xml", "cpu", "gpu",
+]
+
+// macOS suppresses banners under a Focus but has no say over afplay, so the ding
+// goes through Do Not Disturb untouched. This is the file it leaves while a
+// Focus is on; it is not a documented interface, so absence is read as "not
+// focused" and a shape that will not parse costs the feature, never the ding.
+let focusAssertionsURL = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/DoNotDisturb/DB/Assertions.json")
+let respectFocusURL = supportDir.appendingPathComponent("respect-focus")
+let inFocusURL = supportDir.appendingPathComponent("in-focus")
 let notificationsBlockedURL = supportDir.appendingPathComponent("notifications-blocked")
 
 // A meeting is the microphone being live, which is one signal covering Meet,
@@ -183,7 +208,12 @@ let muteDurations: [(title: String, minutes: Int)] = [
 let scriptURL = supportDir.appendingPathComponent("notify.sh")
 
 let systemSoundsDir = URL(fileURLWithPath: "/System/Library/Sounds")
-let defaultSound = systemSoundsDir.appendingPathComponent("Glass.aiff")
+// Glass is the macOS default and sounds like an error to anyone who has used a
+// Mac for a decade. Droplet is one of the alert tones macOS ships but never
+// surfaces in System Settings: shorter, softer, and not already loaded with
+// meaning. It is only the default — the Sound menu still has all 101.
+let defaultSound = URL(fileURLWithPath: "/System/Library/PrivateFrameworks/ToneLibrary.framework"
+    + "/Versions/A/Resources/AlertTones/EncoreInfinitum/Droplet-EncoreInfinitum.caf")
 let audioExtensions: Set<String> = ["aiff", "aif", "wav", "mp3", "m4a", "caf", "aac"]
 
 // Sounds macOS ships but never surfaces in System Settings. Browsing them keeps

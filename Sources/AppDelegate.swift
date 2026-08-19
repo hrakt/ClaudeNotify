@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     var settingsVolumeLabel: NSTextField?
     var settingsMuteCheckbox: NSButton?
     var settingsDuckCheckbox: NSButton?
+    var settingsFocusCheckbox: NSButton?
     var settingsCadencePopup: NSPopUpButton?
     var settingsRepeatsPopup: NSPopUpButton?
     var lastReminded: [String: Date] = [:]
@@ -29,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     var meetingNoticePosted = false
     var meetingID = 0
     var loggedMeetingUnavailable = false
+    var focusReadable: Bool?
     var audioListeners: [(AudioDeviceID, AudioObjectPropertyListenerBlock)] = []
     var meetingCheckTimer: Timer?
     var forcedMeetingWatcher: DispatchSourceFileSystemObject?
