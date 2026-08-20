@@ -210,3 +210,73 @@ extension AppDelegate {
         preview?.play()
     }
 }
+
+// MARK: - A tone per project
+
+extension AppDelegate {
+    var distinctProjectSounds: Bool {
+        guard let raw = try? String(contentsOf: distinctProjectSoundsURL, encoding: .utf8) else {
+            return false
+        }
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
+    }
+
+    func projectSound(for sessionID: String) -> URL? {
+        guard distinctProjectSounds, let project = projectName(for: sessionID) else { return nil }
+        let pointer = projectSoundsDir.appendingPathComponent(project)
+        guard let raw = try? String(contentsOf: pointer, encoding: .utf8) else { return nil }
+        let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
+    // Assignments are made ahead of the ding, not during it, because the hook
+    // plays the sound itself whenever ducking is off and can only read what is
+    // already there. Doing it when the session list is refreshed means a project
+    // has its tone before it ever finishes a turn.
+    func ensureProjectSounds() {
+        guard distinctProjectSounds else { return }
+        let fm = FileManager.default
+        try? fm.createDirectory(at: projectSoundsDir, withIntermediateDirectories: true)
+
+        // Grows as assignments are made. Computing it once and reading it many
+        // times hands the same tone to every project assigned in one pass, which
+        // is exactly the thing this is for.
+        var taken = Set((try? fm.contentsOfDirectory(at: projectSoundsDir,
+                                                     includingPropertiesForKeys: nil,
+                                                     options: [.skipsHiddenFiles]))?
+            .compactMap { try? String(contentsOf: $0, encoding: .utf8) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? [])
+
+        for session in liveSessions() {
+            let project = session.project
+            guard project != "session", !project.isEmpty else { continue }
+            let pointer = projectSoundsDir.appendingPathComponent(project)
+            guard !fm.fileExists(atPath: pointer.path) else { continue }
+
+            // Hashed rather than handed out in arrival order, so the same project
+            // gets the same tone on any machine and after any reset. Swift's own
+            // hashing is seeded per process and would not survive a relaunch.
+            var index = Int(stableHash(project) % UInt64(projectSoundRotation.count))
+            for _ in 0..<projectSoundRotation.count {
+                let candidate = projectSoundRotation[index]
+                if !taken.contains(candidate.path) { break }
+                index = (index + 1) % projectSoundRotation.count
+            }
+            let chosen = projectSoundRotation[index]
+            try? chosen.path.write(to: pointer, atomically: true, encoding: .utf8)
+            taken.insert(chosen.path)
+        }
+    }
+
+    // FNV-1a. Any stable function would do; the point is only that it does not
+    // change between runs.
+    func stableHash(_ text: String) -> UInt64 {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in text.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        return hash
+    }
+}

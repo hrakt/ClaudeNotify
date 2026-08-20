@@ -19,6 +19,8 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/sessions/   one file per session id, holding its sound
 ~/.claude/claudenotify/session-volumes/  per-session volume overrides
 ~/.claude/claudenotify/speak-project  0 disables saying the project name, absent or 1 enables it
+~/.claude/claudenotify/project-sounds-on  1 gives every project its own tone
+~/.claude/claudenotify/project-sounds/   one file per project name, holding its tone
 ~/.claude/claudenotify/respect-focus  0 disables Focus awareness, absent or 1 enables it
 ~/.claude/claudenotify/in-focus    raised by the app while a macOS Focus is on
 ~/.claude/claudenotify/ttys/       which tty each session runs on
@@ -118,6 +120,8 @@ The menu holds:
 - **Sessions** lists your recent Claude Code sessions by name, so you can tell parallel work apart by ear. Open a session's submenu and choose **Use Current Sound** to give it the sound you currently have selected. Each session also gets its own **volume slider**, useful for turning a chatty background session down without losing the one you care about. A session with no override follows the global volume, and the submenu says which is in effect. **Clear Session Settings** drops both the sound and the volume override. A check mark on the session means it has its own sound.
 - **Remind Me Again** re-notifies about a session that finished and is still sitting there untouched: every 2, 5, 10 or 30 minutes, or hourly. **Off by default.** A session stops being reminded the moment anything touches it, when it ends, and while you are muted.
   - **Remind Me Again → Repeats** caps how many times one session may nag before it gives up: 3, 6 (the default), 12, or unlimited. Six at a ten minute cadence means a session you abandon goes quiet after an hour rather than all afternoon. The count resets as soon as the session is touched.
+- **Settings → A different sound for each project** gives every project its own tone, so which one finished is audible without looking. **Off by default**, since it overrides whatever single sound you picked. See [A tone per project](#a-tone-per-project).
+- **Settings → Open at login** starts the app when you log in.
 - **Speak Project Name** says which project just finished — "cam F E", "cam A P I" — after the chime. **Off by default**, since spoken words cost more attention than a chime; one click turns it on. See [Saying which project it was](#saying-which-project-it-was).
 - **Quiet During Meetings** holds the sound and the banners while you are on a call, tells you it is doing so with a **Notify Anyway** button to overrule it, and says what finished once it ends. On by default. See [Staying quiet during meetings](#staying-quiet-during-meetings).
 - **Volume** is a slider from 10% to 100%. The percentage above it updates as you drag, and releasing the slider plays the current sound at the new level so you can hear what you picked. It applies to both the in-app preview and the real notification.
@@ -150,6 +154,25 @@ A session killed outright, by closing the terminal or `kill -9`, never sends `Se
 **Titles lag slightly**, since `aiTitle` is only written once Claude has enough context to name the session.
 
 Transcripts can reach tens of megabytes, so the app reads only the last 200KB of each rather than parsing the file. That keeps opening the menu at a few milliseconds instead of seconds.
+
+### A tone per project
+
+Assignment is automatic but **stable**: a project keeps its tone across restarts and resets, because the name is hashed rather than handed out in arrival order. `cam-fe` sounds like `cam-fe` tomorrow.
+
+Tones are drawn from a fixed rotation and no two projects share one until the rotation runs out. The list leads with the default, so the first project keeps the sound you already know.
+
+Precedence, most specific first:
+
+1. a sound you assigned to that **session** by hand
+2. the **needs-you** sound, when Claude is blocked on you — urgency outranks identity, so being blocked always sounds the same
+3. the project's tone
+4. the single sound you chose
+
+Assignments are written to disk ahead of time rather than worked out at the moment of the ding, because the hook plays the sound itself whenever ducking is off and can only read what is already there. The app assigns when it refreshes the session list, so a project has its tone before it ever finishes a turn.
+
+### Opening at login
+
+`SMAppService.mainApp` registers the bundle itself, which needs no helper target and no plist of ours. macOS lets you veto login items in **System Settings › General › Login Items**, so the status can come back as *requires approval* — the checkbox says so rather than sitting ticked while nothing happens.
 
 ### Saying which project it was
 

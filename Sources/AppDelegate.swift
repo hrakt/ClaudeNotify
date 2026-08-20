@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     var settingsMuteCheckbox: NSButton?
     var settingsDuckCheckbox: NSButton?
     var settingsFocusCheckbox: NSButton?
+    var settingsProjectSoundsCheckbox: NSButton?
+    var settingsLoginCheckbox: NSButton?
     var settingsCadencePopup: NSPopUpButton?
     var settingsRepeatsPopup: NSPopUpButton?
     var lastReminded: [String: Date] = [:]

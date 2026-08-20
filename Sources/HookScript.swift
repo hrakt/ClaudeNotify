@@ -174,6 +174,20 @@ if [ -n "$SESSION_ID" ]; then
     fi
 fi
 
+# One tone per project, so which of them finished is audible. Assigned by the
+# app and only read here, which is why the app does it ahead of time rather than
+# at the moment of the ding. An explicitly chosen session sound still wins.
+if [ -z "$CHOSEN_SESSION" ] \
+    && [ "$(cat "$HOME/.claude/claudenotify/project-sounds-on" 2>/dev/null)" = "1" ]; then
+    PROJECT_TONE="$HOME/.claude/claudenotify/project-sounds/${CWD##*/}"
+    if [ -f "$PROJECT_TONE" ]; then
+        CHOSEN_PROJECT="$(cat "$PROJECT_TONE")"
+        if [ -n "$CHOSEN_PROJECT" ] && [ -f "$CHOSEN_PROJECT" ]; then
+            SOUND="$CHOSEN_PROJECT"
+        fi
+    fi
+fi
+
 VOLUME="1"
 VOLUME_POINTER="$HOME/.claude/claudenotify/volume"
 if [ -f "$VOLUME_POINTER" ]; then

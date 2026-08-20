@@ -41,6 +41,33 @@ let defaultAttentionSound = systemSoundsDir.appendingPathComponent("Submarine.ai
 // have running just wanted you.
 let speakProjectURL = supportDir.appendingPathComponent("speak-project")
 
+// One tone per project, so which of them finished is audible without reading
+// anything. Assignments are kept on disk rather than derived on the fly: the
+// hook has to reach the same answer as the app, and a project that changed tone
+// between one ding and the next would be worse than them all sounding alike.
+let projectSoundsDir = supportDir.appendingPathComponent("project-sounds")
+let distinctProjectSoundsURL = supportDir.appendingPathComponent("project-sounds-on")
+
+// Ordered, and picked for being told apart rather than for being pleasant on
+// their own. Passage leads because it is the default, so the project you touch
+// first keeps the sound you already know.
+let alertTonesDir = URL(fileURLWithPath:
+    "/System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources"
+    + "/AlertTones/EncoreInfinitum")
+
+let projectSoundRotation: [URL] = [
+    alertTonesDir.appendingPathComponent("Passage-EncoreInfinitum.caf"),
+    alertTonesDir.appendingPathComponent("Milestone-EncoreInfinitum.caf"),
+    alertTonesDir.appendingPathComponent("Portal-EncoreInfinitum.caf"),
+    alertTonesDir.appendingPathComponent("Cheers-EncoreInfinitum.caf"),
+    alertTonesDir.appendingPathComponent("Slide-EncoreInfinitum.caf"),
+    systemSoundsDir.appendingPathComponent("Bottle.aiff"),
+    systemSoundsDir.appendingPathComponent("Tink.aiff"),
+    systemSoundsDir.appendingPathComponent("Purr.aiff"),
+    systemSoundsDir.appendingPathComponent("Hero.aiff"),
+    systemSoundsDir.appendingPathComponent("Blow.aiff"),
+]
+
 // Pieces of a project name that are initialisms rather than words, and so are
 // spelled out rather than pronounced. Anything two letters or shorter is
 // assumed to be one of these already; this is for the three-letter cases, where

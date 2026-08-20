@@ -1,4 +1,5 @@
 import Cocoa
+import ServiceManagement
 import UserNotifications
 
 extension AppDelegate {
@@ -21,8 +22,10 @@ extension AppDelegate {
             self?.updateUI()
             self?.checkReminders()
             self?.refreshFocusFlag()
+            self?.ensureProjectSounds()
         }
         refreshFocusFlag()
+        ensureProjectSounds()
 
         let center = UNUserNotificationCenter.current()
         center.delegate = self
@@ -84,6 +87,7 @@ extension AppDelegate {
         try? fm.createDirectory(at: deferredDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: pendingDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: pendingMetaDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: projectSoundsDir, withIntermediateDirectories: true)
 
         // If macOS no longer offers the ducking call, the preference is written
         // off rather than merely greyed out in Settings. The hook reads that
@@ -107,6 +111,34 @@ extension AppDelegate {
             try? scriptBody.write(to: scriptURL, atomically: true, encoding: .utf8)
         }
         try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+    }
+
+    // SMAppService registers the bundle itself as a login item, which is the
+    // supported route and needs no helper target and no plist of our own. It can
+    // land in requiresApproval, because macOS lets the user veto login items in
+    // System Settings, and a checkbox that silently disagreed with that would be
+    // worse than one that admits it.
+    var launchesAtLogin: Bool { SMAppService.mainApp.status == .enabled }
+
+    @objc func toggleLaunchAtLogin(_ sender: NSButton) {
+        do {
+            if sender.state == .on {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            NSLog("ClaudeNotify: could not change login item: \(error.localizedDescription)")
+        }
+        refreshSettings()
+    }
+
+    func loginItemNote() -> String? {
+        switch SMAppService.mainApp.status {
+        case .requiresApproval: return "Approve it in System Settings › General › Login Items"
+        case .notFound: return "macOS cannot find this copy of the app"
+        default: return nil
+        }
     }
 
     func presentError(_ message: String, _ detail: String) {

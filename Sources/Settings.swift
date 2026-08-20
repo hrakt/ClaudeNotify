@@ -41,7 +41,7 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
         }
 
         let width: CGFloat = 540
-        let height: CGFloat = 608
+        let height: CGFloat = 656
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.titled, .closable, .miniaturizable],
@@ -87,8 +87,24 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
         content.addSubview(focus)
         settingsFocusCheckbox = focus
 
-        content.addSubview(label("Volume", NSRect(x: 20, y: height - 154, width: 120, height: 20)))
-        let volume = NSSlider(frame: NSRect(x: 150, y: height - 156, width: 300, height: 24))
+        let perProject = NSButton(checkboxWithTitle: "A different sound for each project",
+                                  target: self,
+                                  action: #selector(settingsProjectSoundsChanged(_:)))
+        perProject.frame = NSRect(x: 20, y: height - 144, width: 380, height: 20)
+        perProject.toolTip = "Gives every project its own tone, so which one finished is "
+            + "audible without looking."
+        content.addSubview(perProject)
+        settingsProjectSoundsCheckbox = perProject
+
+        let login = NSButton(checkboxWithTitle: "Open at login",
+                             target: self,
+                             action: #selector(toggleLaunchAtLogin(_:)))
+        login.frame = NSRect(x: 20, y: height - 168, width: 380, height: 20)
+        content.addSubview(login)
+        settingsLoginCheckbox = login
+
+        content.addSubview(label("Volume", NSRect(x: 20, y: height - 202, width: 120, height: 20)))
+        let volume = NSSlider(frame: NSRect(x: 150, y: height - 204, width: 300, height: 24))
         volume.minValue = 0.1
         volume.maxValue = 1.0
         volume.isContinuous = true
@@ -97,39 +113,39 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
         content.addSubview(volume)
         settingsVolumeSlider = volume
 
-        let volumeValue = label("", NSRect(x: 460, y: height - 154, width: 60, height: 20))
+        let volumeValue = label("", NSRect(x: 460, y: height - 202, width: 60, height: 20))
         content.addSubview(volumeValue)
         settingsVolumeLabel = volumeValue
 
-        content.addSubview(label("Remind me again", NSRect(x: 20, y: height - 192, width: 130, height: 20)))
-        let cadence = NSPopUpButton(frame: NSRect(x: 150, y: height - 196, width: 200, height: 26))
+        content.addSubview(label("Remind me again", NSRect(x: 20, y: height - 240, width: 130, height: 20)))
+        let cadence = NSPopUpButton(frame: NSRect(x: 150, y: height - 244, width: 200, height: 26))
         for choice in reminderChoices { cadence.addItem(withTitle: choice.title) }
         cadence.target = self
         cadence.action = #selector(settingsCadenceChanged(_:))
         content.addSubview(cadence)
         settingsCadencePopup = cadence
 
-        content.addSubview(label("Repeats", NSRect(x: 20, y: height - 230, width: 130, height: 20)))
-        let repeats = NSPopUpButton(frame: NSRect(x: 150, y: height - 234, width: 200, height: 26))
+        content.addSubview(label("Repeats", NSRect(x: 20, y: height - 278, width: 130, height: 20)))
+        let repeats = NSPopUpButton(frame: NSRect(x: 150, y: height - 282, width: 200, height: 26))
         for choice in reminderLimitChoices { repeats.addItem(withTitle: choice.title) }
         repeats.target = self
         repeats.action = #selector(settingsRepeatsChanged(_:))
         content.addSubview(repeats)
         settingsRepeatsPopup = repeats
 
-        let divider = NSBox(frame: NSRect(x: 20, y: height - 256, width: width - 40, height: 1))
+        let divider = NSBox(frame: NSRect(x: 20, y: height - 304, width: width - 40, height: 1))
         divider.boxType = .separator
         content.addSubview(divider)
 
-        content.addSubview(label("Notification sound", NSRect(x: 20, y: height - 288, width: 250, height: 18), bold: true))
+        content.addSubview(label("Notification sound", NSRect(x: 20, y: height - 336, width: 250, height: 18), bold: true))
 
-        let search = NSSearchField(frame: NSRect(x: 20, y: height - 322, width: width - 40, height: 24))
+        let search = NSSearchField(frame: NSRect(x: 20, y: height - 370, width: width - 40, height: 24))
         search.placeholderString = "Search sounds"
         search.target = self
         search.action = #selector(settingsSearchChanged(_:))
         content.addSubview(search)
 
-        let scroll = NSScrollView(frame: NSRect(x: 20, y: 60, width: width - 40, height: height - 394))
+        let scroll = NSScrollView(frame: NSRect(x: 20, y: 60, width: width - 40, height: height - 442))
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
 
@@ -175,6 +191,11 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
         // Offering a tick for something macOS will not let the app see would be
         // a promise it cannot keep, so the box says why instead.
         let canSeeFocus = focusIsReadable()
+        settingsProjectSoundsCheckbox?.state = distinctProjectSounds ? .on : .off
+        settingsLoginCheckbox?.state = launchesAtLogin ? .on : .off
+        settingsLoginCheckbox?.title = loginItemNote().map { "Open at login — \($0)" }
+            ?? "Open at login"
+
         settingsFocusCheckbox?.state = (respectFocus && canSeeFocus) ? .on : .off
         settingsFocusCheckbox?.isEnabled = canSeeFocus
         settingsFocusCheckbox?.title = canSeeFocus
@@ -223,6 +244,17 @@ extension AppDelegate: NSTableViewDataSource, NSTableViewDelegate {
         // Preview it the way it will actually happen, which is the only way to
         // judge whether the dip is worth having.
         playLoweringOthers(selectedSound)
+    }
+
+    @objc func settingsProjectSoundsChanged(_ sender: NSButton) {
+        try? (sender.state == .on ? "1" : "0")
+            .write(to: distinctProjectSoundsURL, atomically: true, encoding: .utf8)
+        // Assign straight away rather than waiting for the next sweep, so the
+        // very next ding already sounds like its project.
+        ensureProjectSounds()
+        if sender.state == .on, let first = liveSessions().first {
+            playLoweringOthers(projectSound(for: first.id) ?? selectedSound)
+        }
     }
 
     @objc func settingsFocusChanged(_ sender: NSButton) {

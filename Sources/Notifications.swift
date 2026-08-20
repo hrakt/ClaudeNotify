@@ -83,7 +83,8 @@ extension AppDelegate {
                 // was chosen to tell sessions apart, which is the more specific
                 // thing to be saying.
                 let sound = assignedSound(for: sessionID)
-                    ?? (needsYou ? attentionSound : selectedSound)
+                    ?? (needsYou ? attentionSound
+                        : (projectSound(for: sessionID) ?? selectedSound))
                 playLoweringOthers(sound, volume: sessionVolume(for: sessionID))
 
                 // After the sound, not instead of it: the chime is what gets
