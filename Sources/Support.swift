@@ -85,6 +85,8 @@ let focusAssertionsURL = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/DoNotDisturb/DB/Assertions.json")
 let respectFocusURL = supportDir.appendingPathComponent("respect-focus")
 let inFocusURL = supportDir.appendingPathComponent("in-focus")
+// Drawn at launch, one per kind of banner.
+let iconsDir = supportDir.appendingPathComponent("icons")
 let notificationsBlockedURL = supportDir.appendingPathComponent("notifications-blocked")
 
 // A meeting is the microphone being live, which is one signal covering Meet,

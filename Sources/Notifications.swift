@@ -128,7 +128,8 @@ extension AppDelegate {
                 subtitle: resolved,
                 body: reminder.map { "\($0). \(destination)" } ?? destination,
                 fallbackSubtitle: resolved,
-                fallbackBody: reminder)
+                fallbackBody: reminder,
+                icon: needsYou ? .needsYou : .finished)
     }
 
     func postSummaryNotification(sessionID: String, title: String, body: String) {
@@ -137,7 +138,8 @@ extension AppDelegate {
                 subtitle: body,
                 body: "Click to go to the most recent.",
                 fallbackSubtitle: body,
-                fallbackBody: title)
+                fallbackBody: title,
+                icon: .finished)
     }
 
     // Every failure path ends in a visible banner. Permission can be refused at
@@ -150,7 +152,8 @@ extension AppDelegate {
                  fallbackSubtitle: String,
                  fallbackBody: String?,
                  category: String? = nil,
-                 info: [String: Any] = [:]) {
+                 info: [String: Any] = [:],
+                 icon: NotificationIcon? = nil) {
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
             guard let self else { return }
 
@@ -168,6 +171,7 @@ extension AppDelegate {
             content.body = body
             content.userInfo = info.merging(["session": sessionID]) { current, _ in current }
             if let category { content.categoryIdentifier = category }
+            if let icon, let image = self.attachment(icon) { content.attachments = [image] }
 
             let request = UNNotificationRequest(
                 identifier: "\(sessionID)-\(Date().timeIntervalSince1970)",

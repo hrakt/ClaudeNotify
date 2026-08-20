@@ -24,6 +24,7 @@ extension AppDelegate {
             self?.refreshFocusFlag()
             self?.ensureProjectSounds()
         }
+        renderNotificationIcons()
         refreshFocusFlag()
         ensureProjectSounds()
 
