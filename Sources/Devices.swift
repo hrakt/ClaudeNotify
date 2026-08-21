@@ -67,7 +67,7 @@ extension AppDelegate {
             // meeting held through is worse than music occasionally read as one.
             if !loggedMeetingUnavailable {
                 loggedMeetingUnavailable = true
-                NSLog("ClaudeNotify: macOS 14.4+ needed to tell recording from playback; using the device signal")
+                note("macOS 14.4+ needed to tell recording from playback; using the device signal")
             }
             return true
         }

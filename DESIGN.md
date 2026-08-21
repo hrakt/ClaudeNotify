@@ -39,6 +39,7 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/sound-attention  one line: sound for "Claude needs you", defaults to Submarine
 ~/.claude/claudenotify/pending/    banner handoff: script drops a session id, app posts it
 ~/.claude/claudenotify/pending-meta/ which event it was, and whether the app owes the ding
+~/.claude/claudenotify/log.txt     what the app decided, and what it could not do
 ~/.claude/claudenotify/notifications-blocked  written when macOS refuses the app permission
 ```
 

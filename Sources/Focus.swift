@@ -32,7 +32,7 @@ extension AppDelegate {
             atPath: focusAssertionsURL.deletingLastPathComponent().path)) != nil
         focusReadable = readable
         if !readable {
-            NSLog("ClaudeNotify: Focus state is not readable without Full Disk Access; "
+            note("Focus state is not readable without Full Disk Access; "
                 + "the sound will play through a Focus until that is granted")
         }
         return readable

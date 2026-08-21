@@ -47,7 +47,7 @@ extension AppDelegate {
                 options: []),
         ])
         center.requestAuthorization(options: [.alert]) { [weak self] granted, error in
-            NSLog("ClaudeNotify: notification authorization granted=\(granted) error=\(error?.localizedDescription ?? "none")")
+            note("notification authorization granted=\(granted) error=\(error?.localizedDescription ?? "none")")
             DispatchQueue.main.async { self?.recordNotificationPermission(granted) }
         }
         startWatchingPending()
@@ -129,7 +129,7 @@ extension AppDelegate {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            NSLog("ClaudeNotify: could not change login item: \(error.localizedDescription)")
+            note("could not change login item: \(error.localizedDescription)")
         }
         refreshSettings()
     }

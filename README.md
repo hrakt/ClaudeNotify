@@ -44,6 +44,11 @@ Launching it writes `~/.claude/claudenotify/notify.sh`. Point your hooks at that
 
 Click the bell to mute, click again to unmute. Right click for sounds, sessions, volume, reminders and settings.
 
+## When something looks wrong
+
+`~/.claude/claudenotify/log.txt` says what the app decided and why. It is where
+the app explains the things it cannot do, such as Focus needing Full Disk Access.
+
 ## Requirements
 
 macOS 13 or later, plus the Xcode command line tools to build it. No dependencies, no frameworks, about 3,400 lines of Swift.

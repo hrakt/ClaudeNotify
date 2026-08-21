@@ -14,7 +14,7 @@ let audioDeviceDuck: AudioDeviceDuckFn? = {
     // RTLD_DEFAULT: CoreAudio is already linked, so this searches what is loaded
     // rather than opening anything new.
     guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "AudioDeviceDuck") else {
-        NSLog("ClaudeNotify: AudioDeviceDuck unavailable; other audio will not be lowered")
+        note("AudioDeviceDuck unavailable; other audio will not be lowered")
         return nil
     }
     return unsafeBitCast(symbol, to: AudioDeviceDuckFn.self)

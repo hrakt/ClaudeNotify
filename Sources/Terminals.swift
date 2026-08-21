@@ -5,6 +5,9 @@ extension AppDelegate {
     // window that comes forward is already showing the right session rather than
     // visibly flipping to it afterwards.
     func focusTerminal(for sessionID: String) {
+        note("click for session \(sessionID.prefix(8)) -> "
+            + "\(sessionTerminal(sessionID)?.program ?? "no record")")
+
         // Only a session with no record at all gets the legacy fallback. A
         // session recorded in a terminal this app does not know stays put:
         // raising some *other* terminal is worse than doing nothing, and the
@@ -33,14 +36,35 @@ extension AppDelegate {
         }
     }
 
+    // Three things happen here and the order matters. Since macOS 14 an app that
+    // is not frontmost cannot simply raise another one: activation is
+    // cooperative, and the request is dropped silently. Clicking a notification
+    // does give this app the right to come forward, so it takes that first and
+    // then hands it straight on, which is what makes the second call stick.
+    //
+    // openApplication is the fallback rather than the primary, because it also
+    // launches the app, and launching a terminal you did not ask for is worse
+    // than doing nothing.
     func activate(_ app: TerminalApp) {
-        if let running = NSRunningApplication.runningApplications(
-            withBundleIdentifier: app.bundleID).first {
-            running.activate(options: [.activateAllWindows])
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleID).first
+
+        if let running {
+            NSApp.activate(ignoringOtherApps: true)
+            let raised = running.activate(options: [.activateAllWindows])
+            note("raising \(app.name) -> \(raised)")
+            guard !raised else { return }
+        }
+
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleID) else {
+            note("no app installed for \(app.bundleID)")
             return
         }
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleID) {
-            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
+            if let error {
+                note("could not open \(app.name): \(error.localizedDescription)")
+            }
         }
     }
 
@@ -63,7 +87,7 @@ extension AppDelegate {
             try process.run()
             process.waitUntilExit()
         } catch {
-            NSLog("ClaudeNotify: could not switch Orca tab: \(error.localizedDescription)")
+            note("could not switch Orca tab: \(error.localizedDescription)")
         }
     }
 

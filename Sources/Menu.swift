@@ -333,6 +333,13 @@ extension AppDelegate {
                 submenu.addItem(clear)
             }
 
+            let goTo = NSMenuItem(title: "Go to This Session",
+                                  action: #selector(goToSession(_:)),
+                                  keyEquivalent: "")
+            goTo.target = self
+            goTo.representedObject = session.id
+            submenu.addItem(goTo)
+
             let preview = NSMenuItem(title: "Play This Session's Sound",
                                      action: #selector(playSessionSound(_:)),
                                      keyEquivalent: "")
@@ -440,5 +447,15 @@ extension AppDelegate {
         let item = NSMenuItem(title: title, action: selector, keyEquivalent: "")
         item.target = self
         return item
+    }
+}
+
+extension AppDelegate {
+    // The same jump the banner does, reachable from the menu. Useful on its own,
+    // and it means the path can be exercised without waiting for a session to
+    // finish something.
+    @objc func goToSession(_ sender: NSMenuItem) {
+        guard let sessionID = sender.representedObject as? String else { return }
+        focusTerminal(for: sessionID)
     }
 }

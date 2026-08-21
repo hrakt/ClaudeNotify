@@ -5,7 +5,7 @@ extension AppDelegate {
     func startWatchingPending() {
         let descriptor = open(pendingDir.path, O_EVTONLY)
         guard descriptor >= 0 else {
-            NSLog("ClaudeNotify: could not watch \(pendingDir.path)")
+            note("could not watch \(pendingDir.path)")
             return
         }
         let source = DispatchSource.makeFileSystemObjectSource(
@@ -180,7 +180,7 @@ extension AppDelegate {
 
             UNUserNotificationCenter.current().add(request) { error in
                 guard let error else { return }
-                NSLog("ClaudeNotify: could not post notification: \(error.localizedDescription)")
+                note("could not post notification: \(error.localizedDescription)")
                 DispatchQueue.main.async {
                     self.postFallbackBanner(fallbackSubtitle, reminder: fallbackBody)
                 }
