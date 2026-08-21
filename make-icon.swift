@@ -3,8 +3,11 @@ import Cocoa
 let outputDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "ClaudeNotify.iconset"
 try? FileManager.default.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
 
-let top = NSColor(calibratedRed: 0.42, green: 0.51, blue: 0.96, alpha: 1)
-let bottom = NSColor(calibratedRed: 0.23, green: 0.29, blue: 0.78, alpha: 1)
+// Warm clay rather than the blue every notification utility already uses. It
+// stands out in a menu bar full of blue, and it sits next to Claude Code without
+// borrowing anyone's mark to say so.
+let top = NSColor(srgbRed: 238/255.0, green: 158/255.0, blue: 118/255.0, alpha: 1)
+let bottom = NSColor(srgbRed: 198/255.0, green: 94/255.0, blue: 62/255.0, alpha: 1)
 
 func render(_ size: Int) -> Data? {
     guard let rep = NSBitmapImageRep(
@@ -30,6 +33,16 @@ func render(_ size: Int) -> Data? {
     let shape = NSBezierPath(roundedRect: plate, xRadius: radius, yRadius: radius)
     NSGradient(starting: top, ending: bottom)?.draw(in: shape, angle: -90)
 
+    // One soft highlight across the top and nothing else. A bevelled rim was
+    // tried and reads as a glossy button from fifteen years ago; current macOS
+    // plates are flat with a gradient.
+    NSGraphicsContext.saveGraphicsState()
+    shape.setClip()
+    NSGradient(colors: [NSColor(white: 1, alpha: 0.14), NSColor(white: 1, alpha: 0)])?
+        .draw(in: NSRect(x: plate.minX, y: plate.maxY - plate.height * 0.5,
+                         width: plate.width, height: plate.height * 0.5), angle: -90)
+    NSGraphicsContext.restoreGraphicsState()
+
     let glyphSize = canvas * 0.52
     let config = NSImage.SymbolConfiguration(pointSize: glyphSize, weight: .semibold)
     if let bell = NSImage(systemSymbolName: "bell.fill", accessibilityDescription: nil)?
@@ -37,7 +50,10 @@ func render(_ size: Int) -> Data? {
         let drawn = bell.size
         let scale = min(glyphSize / drawn.width, glyphSize / drawn.height)
         let target = NSSize(width: drawn.width * scale, height: drawn.height * scale)
-        let origin = NSPoint(x: (canvas - target.width) / 2, y: (canvas - target.height) / 2)
+        // Nudged up off true centre: the clapper carries visual weight low, so a
+        // mathematically centred bell looks like it has slipped down the plate.
+        let origin = NSPoint(x: (canvas - target.width) / 2,
+                             y: (canvas - target.height) / 2 + canvas * 0.012)
 
         let tinted = NSImage(size: target)
         tinted.lockFocus()
@@ -47,7 +63,16 @@ func render(_ size: Int) -> Data? {
         glyphRect.fill(using: .sourceAtop)
         tinted.unlockFocus()
 
+        // A shadow under the glyph, so the bell sits on the plate rather than
+        // being painted onto it.
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor(white: 0, alpha: 0.22)
+        shadow.shadowBlurRadius = canvas * 0.03
+        shadow.shadowOffset = NSSize(width: 0, height: -canvas * 0.01)
+        shadow.set()
         tinted.draw(in: NSRect(origin: origin, size: target))
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     NSGraphicsContext.restoreGraphicsState()

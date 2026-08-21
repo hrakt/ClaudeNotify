@@ -88,12 +88,27 @@ extension AppDelegate {
         return rep.representation(using: .png, properties: [:])
     }
 
-    // Attachments are copied out of the app's control by the notification centre,
-    // so the same file can be handed over repeatedly. A failure here costs the
-    // picture and nothing else.
+    // The notification centre MOVES an attachment's file into its own store
+    // rather than copying it, so handing it the master would work exactly once
+    // and every later banner of that kind would arrive bare. A throwaway copy is
+    // passed instead, and the master is never touched.
+    //
+    // Found the hard way: two of the four icons had already vanished from disk
+    // after a single round of test banners.
     func attachment(_ icon: NotificationIcon) -> UNNotificationAttachment? {
-        let url = iconsDir.appendingPathComponent("\(icon.name).png")
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return try? UNNotificationAttachment(identifier: icon.name, url: url, options: nil)
+        let master = iconsDir.appendingPathComponent("\(icon.name).png")
+        guard FileManager.default.fileExists(atPath: master.path) else { return nil }
+
+        let copy = FileManager.default.temporaryDirectory
+            .appendingPathComponent("claudenotify-\(icon.name)-\(UUID().uuidString).png")
+        guard (try? FileManager.default.copyItem(at: master, to: copy)) != nil else { return nil }
+
+        guard let attached = try? UNNotificationAttachment(
+            identifier: icon.name, url: copy, options: nil) else {
+            // Only reachable if the move never happened, so this is our litter.
+            try? FileManager.default.removeItem(at: copy)
+            return nil
+        }
+        return attached
     }
 }

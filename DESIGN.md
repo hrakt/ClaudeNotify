@@ -53,7 +53,7 @@ Because the hook only ever names the script, new features ship by rewriting the 
 open ClaudeNotify.app # runs it (menu-bar only, no Dock icon)
 ```
 
-The icon is drawn by `make-icon.swift` rather than stored as a binary asset: a white bell on a blue gradient squircle, rendered at all ten sizes and packed into `AppIcon.icns` by `iconutil`. Editing the colours or glyph means editing code, and `./build.sh` regenerates it.
+The icon is drawn by `make-icon.swift` rather than stored as a binary asset: a white bell on a warm clay squircle, rendered at all ten sizes and packed into `AppIcon.icns` by `iconutil`. Editing the colours or glyph means editing code, and `./build.sh` regenerates it.
 
 Requires the Swift toolchain (Xcode command line tools) and macOS 13+.
 
