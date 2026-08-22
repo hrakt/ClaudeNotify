@@ -364,6 +364,29 @@ Activity is the later of two timestamps: the session's heartbeat in `live/`, and
 
 Reminders live entirely in the app, needing no hook or `settings.json` change, so the cadence can be changed from the menu with nothing to reinstall. They are suppressed while muted, since muting means leave me alone, and the count resets as soon as the session shows activity again.
 
+## Tests
+
+`./tests/run.sh` runs two suites. The Swift one covers pure functions and pins
+invariants on the generated shell script, which is a string literal and so
+invisible to any linter. The shell one runs that script for real in a sandbox
+HOME, with afplay, say and osascript stubbed out so it is silent and so every
+assertion is about exactly what would have been heard.
+
+Two details make the shell suite able to test both halves of the app-running
+branch. The pgrep pattern is rewritten to a token the suite starts and stops at
+will, and a Swift assertion pins the real pattern so the rewrite cannot conceal a
+broken one. The stand-in process is started with `exec -a` so the token stays in
+argv for pgrep while the pid remains the sleep itself; plain `exec` loses the
+token, and a plain background call leaves an orphan holding the output pipe open,
+which hangs whatever is running the suite.
+
+The suite was checked by reintroducing five bugs this project actually shipped:
+the leading dash in `tr` that spoke empty strings, standing aside with no session
+id so neither side played anything, honouring a stale meeting flag into permanent
+silence, failing to gate the ding on Focus, and letting the attention tone drift
+away from the app's. All five fail the suite. A suite that has never failed is
+not evidence of anything.
+
 ## Stack
 
 Swift + Cocoa (`NSStatusItem`), no dependencies.

@@ -1,0 +1,154 @@
+import Cocoa
+import Foundation
+
+// Two jobs. Given --emit-hook it writes the generated shell script somewhere the
+// shell tests can run it, so those test the real thing rather than a copy that
+// has drifted. Otherwise it runs the unit tests.
+//
+// Only pure functions are exercised here. Anything that reads or writes would
+// touch the real ~/.claude, and a test suite that can damage the thing it is
+// testing is worse than no test suite.
+
+var failures: [String] = []
+var checks = 0
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    checks += 1
+    if actual != expected {
+        failures.append("\(label)\n      got: \(actual)\n      want: \(expected)")
+    }
+}
+
+func check(_ label: String, _ condition: Bool) {
+    checks += 1
+    if !condition { failures.append(label) }
+}
+
+// The script is the most failure-prone thing in the project and the least
+// visible: it is a string literal, so nothing lints it. These assertions pin
+// the specific mistakes that have already been made once.
+func testScriptInvariants() {
+    let s = scriptBody
+
+    check("hook: pgrep pattern matches the real bundle path",
+          s.contains("pgrep -f \"ClaudeNotify.app/Contents/MacOS/ClaudeNotify\""))
+
+    // A leading dash in tr's first argument is read as an option, so this
+    // silently spoke empty strings.
+    check("hook: tr separators do not start with a dash", s.contains("tr '_-'"))
+    check("hook: tr separators are not the broken order", !s.contains("tr '-_'"))
+
+    // Standing aside without a session id meant neither side played anything.
+    check("hook: standing aside requires a session id",
+          s.contains("if [ -n \"$APP_RUNNING\" ] && [ -n \"$SESSION_ID\" ]; then"))
+
+    // Every reason to stay silent has to gate the ding, not just the first one.
+    check("hook: the ding is gated on meeting, focus and ducking",
+          s.contains("if [ -z \"$QUIET\" ] && [ -z \"$FOCUS\" ] && [ -z \"$DUCK\" ]; then"))
+
+    // Honouring a leftover flag with no app behind it silenced the hook
+    // completely and permanently.
+    check("hook: the meeting flag is only honoured while the app runs",
+          s.contains("if [ -n \"$APP_RUNNING\" ] && [ -f \"$HOME/.claude/claudenotify/in-meeting\" ]"))
+    check("hook: the focus flag is only honoured while the app runs",
+          s.contains("if [ -n \"$APP_RUNNING\" ] && [ -f \"$HOME/.claude/claudenotify/in-focus\" ]"))
+
+    check("hook: mute exits before anything can make noise",
+          s.range(of: "notifications-muted")!.lowerBound < s.range(of: "afplay")!.lowerBound)
+
+    check("hook: default tone agrees with the app's",
+          s.contains(defaultSound.lastPathComponent))
+    check("hook: attention tone agrees with the app's",
+          s.contains(defaultAttentionSound.lastPathComponent))
+}
+
+func testSpokenProject() {
+    let app = AppDelegate()
+    check("spoken: cam-fe",        app.spokenProject("cam-fe"), "Cam F E")
+    check("spoken: cam-api",       app.spokenProject("cam-api"), "Cam A P I")
+    check("spoken: cm-intranet",   app.spokenProject("cm-intranet"), "C M intranet")
+    check("spoken: ClaudeNotify",  app.spokenProject("ClaudeNotify"), "Claude Notify")
+    check("spoken: wisplet",       app.spokenProject("wisplet"), "Wisplet")
+    check("spoken: three letter words stay words",
+          app.spokenProject("cam"), "Cam")
+    check("spoken: never empty for a plain name", !app.spokenProject("cam-fe").isEmpty)
+}
+
+func testPrettyName() {
+    let app = AppDelegate()
+    check("pretty: strips the tone suffix",
+          app.prettyName("Droplet-EncoreInfinitum"), "Droplet")
+    check("pretty: splits camel case", app.prettyName("DeskView"), "Desk View")
+    check("pretty: underscores become spaces", app.prettyName("voice_memo"), "Voice memo")
+}
+
+func testOrcaHandle() {
+    let app = AppDelegate()
+    check("handle: accepts a real one",
+          app.isValidOrcaHandle("term_dfac8f1e-8154-4029-8b90-7a0e46b24caa"))
+    check("handle: rejects a missing prefix", !app.isValidOrcaHandle("dfac8f1e"))
+    check("handle: rejects shell metacharacters",
+          !app.isValidOrcaHandle("term_a;rm -rf /"))
+    check("handle: rejects something absurdly long",
+          !app.isValidOrcaHandle("term_" + String(repeating: "a", count: 200)))
+}
+
+func testJSONReading() {
+    let app = AppDelegate()
+    let text = #"{"cwd":"/one"} {"cwd":"/two"}"#
+    check("json: takes the last value", app.lastJSONValue("cwd", in: text) ?? "", "/two")
+    check("json: absent key is nil", app.lastJSONValue("nope", in: text) == nil)
+    check("json: empty value is nil", app.lastJSONValue("k", in: #"{"k":""}"#) == nil)
+}
+
+// Tones are assigned by hashing the project name so a project keeps its sound
+// across restarts. Handing them out in arrival order was the first attempt and
+// depended on which project happened to start first.
+func testProjectToneAssignment() {
+    let app = AppDelegate()
+    check("tones: hashing is stable across calls",
+          app.stableHash("cam-fe") == app.stableHash("cam-fe"))
+    check("tones: different names differ",
+          app.stableHash("cam-fe") != app.stableHash("cam-api"))
+    check("tones: rotation has no duplicates",
+          Set(projectSoundRotation.map { $0.path }).count == projectSoundRotation.count)
+    check("tones: rotation leads with the default",
+          projectSoundRotation.first?.lastPathComponent == defaultSound.lastPathComponent)
+    check("tones: every tone in the rotation exists on disk",
+          projectSoundRotation.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+}
+
+func testIconSet() {
+    check("icons: every kind has a distinct name",
+          Set(NotificationIcon.all.map { $0.name }).count == NotificationIcon.all.count)
+    check("icons: every kind names a real SF Symbol",
+          NotificationIcon.all.allSatisfy {
+              NSImage(systemSymbolName: $0.symbol, accessibilityDescription: nil) != nil
+          })
+}
+
+// MARK: - entry
+
+if let index = CommandLine.arguments.firstIndex(of: "--emit-hook"),
+   CommandLine.arguments.count > index + 1 {
+    let target = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+    try! scriptBody.write(to: target, atomically: true, encoding: .utf8)
+    try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: target.path)
+    exit(0)
+}
+
+testScriptInvariants()
+testSpokenProject()
+testPrettyName()
+testOrcaHandle()
+testJSONReading()
+testProjectToneAssignment()
+testIconSet()
+
+if failures.isEmpty {
+    print("  swift: \(checks) checks passed")
+    exit(0)
+}
+print("  swift: \(failures.count) of \(checks) checks FAILED")
+for f in failures { print("    ✗ \(f)") }
+exit(1)

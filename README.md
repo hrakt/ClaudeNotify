@@ -44,6 +44,17 @@ Launching it writes `~/.claude/claudenotify/notify.sh`. Point your hooks at that
 
 Click the bell to mute, click again to unmute. Right click for sounds, sessions, volume, reminders and settings.
 
+## Tests
+
+```bash
+./tests/run.sh
+```
+
+Nine seconds, no sound, nothing touched outside a temporary directory. The hook
+tests run the real generated script against fixture payloads in a sandbox HOME,
+with afplay, say and osascript replaced by stubs that record what they were
+asked to do.
+
 ## When something looks wrong
 
 `~/.claude/claudenotify/log.txt` says what the app decided and why. It is where
