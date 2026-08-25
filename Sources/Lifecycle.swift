@@ -24,6 +24,7 @@ extension AppDelegate {
             self?.refreshFocusFlag()
             self?.ensureProjectSounds()
         }
+        applyDefaultLoginItem()
         renderNotificationIcons()
         refreshFocusFlag()
         ensureProjectSounds()
@@ -121,6 +122,38 @@ extension AppDelegate {
     // worse than one that admits it.
     var launchesAtLogin: Bool { SMAppService.mainApp.status == .enabled }
 
+    // Registers itself the first time it is ever run, and never again. Reading
+    // the preference's absence as "not yet asked" is what separates a fresh
+    // install from someone who turned it off on purpose: without that, every
+    // launch would quietly undo their choice.
+    func applyDefaultLoginItem() {
+        let status = SMAppService.mainApp.status
+        note("login item status at launch: \(describe(status))")
+
+        guard !FileManager.default.fileExists(atPath: openAtLoginURL.path) else { return }
+
+        do {
+            try SMAppService.mainApp.register()
+            try? "1".write(to: openAtLoginURL, atomically: true, encoding: .utf8)
+            note("registered to open at login -> \(describe(SMAppService.mainApp.status))")
+        } catch {
+            // Recorded as off rather than left undecided, so a failure is not
+            // retried on every launch for the rest of the app's life.
+            try? "0".write(to: openAtLoginURL, atomically: true, encoding: .utf8)
+            note("could not register to open at login: \(error.localizedDescription)")
+        }
+    }
+
+    func describe(_ status: SMAppService.Status) -> String {
+        switch status {
+        case .enabled: return "enabled"
+        case .requiresApproval: return "requires approval in System Settings"
+        case .notRegistered: return "not registered"
+        case .notFound: return "not found"
+        @unknown default: return "unknown"
+        }
+    }
+
     @objc func toggleLaunchAtLogin(_ sender: NSButton) {
         do {
             if sender.state == .on {
@@ -128,6 +161,10 @@ extension AppDelegate {
             } else {
                 try SMAppService.mainApp.unregister()
             }
+            try? (sender.state == .on ? "1" : "0")
+                .write(to: openAtLoginURL, atomically: true, encoding: .utf8)
+            note("open at login set to \(sender.state == .on) -> "
+                + "\(describe(SMAppService.mainApp.status))")
         } catch {
             note("could not change login item: \(error.localizedDescription)")
         }

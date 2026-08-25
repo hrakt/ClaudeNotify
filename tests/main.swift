@@ -1,5 +1,6 @@
 import Cocoa
 import Foundation
+import ServiceManagement
 
 // Two jobs. Given --emit-hook it writes the generated shell script somewhere the
 // shell tests can run it, so those test the real thing rather than a copy that
@@ -118,6 +119,23 @@ func testProjectToneAssignment() {
           projectSoundRotation.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
 }
 
+// The login item itself cannot be tested here: registering touches the real
+// system. What can be pinned is that its preference lives with the others and
+// that every status the app might report has wording, since an unhandled case
+// would show the user an empty checkbox label.
+func testLoginItemPreference() {
+    check("login: preference sits under the support directory",
+          openAtLoginURL.deletingLastPathComponent().path == supportDir.path)
+    check("login: preference is named for what it does",
+          openAtLoginURL.lastPathComponent, "open-at-login")
+
+    let app = AppDelegate()
+    let described = [SMAppService.Status.enabled, .requiresApproval, .notRegistered, .notFound]
+        .map { app.describe($0) }
+    check("login: every status has wording", described.allSatisfy { !$0.isEmpty })
+    check("login: statuses read differently", Set(described).count == described.count)
+}
+
 func testIconSet() {
     check("icons: every kind has a distinct name",
           Set(NotificationIcon.all.map { $0.name }).count == NotificationIcon.all.count)
@@ -143,6 +161,7 @@ testPrettyName()
 testOrcaHandle()
 testJSONReading()
 testProjectToneAssignment()
+testLoginItemPreference()
 testIconSet()
 
 if failures.isEmpty {

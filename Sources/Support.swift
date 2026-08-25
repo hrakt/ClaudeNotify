@@ -83,6 +83,10 @@ let spokenAsLetters: Set<String> = [
 // focused" and a shape that will not parse costs the feature, never the ding.
 let focusAssertionsURL = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/DoNotDisturb/DB/Assertions.json")
+// Registering at login is on unless it has been turned off. The file's absence
+// means "never asked", which is different from "asked for off": only the first
+// distinguishes a fresh install from someone who deliberately unticked the box.
+let openAtLoginURL = supportDir.appendingPathComponent("open-at-login")
 let respectFocusURL = supportDir.appendingPathComponent("respect-focus")
 let inFocusURL = supportDir.appendingPathComponent("in-focus")
 // Drawn at launch, one per kind of banner.

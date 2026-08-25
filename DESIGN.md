@@ -177,6 +177,15 @@ Assignments are written to disk ahead of time rather than worked out at the mome
 
 ### Opening at login
 
+On by default. The app registers itself the first time it is ever run and never
+again, which is what lets an unticked box stay unticked: the preference file's
+absence means "never asked", which is a different thing from "asked for off". A
+failed registration is recorded as off rather than left undecided, so it is not
+retried on every launch forever.
+
+The login item points at wherever the app was when it registered, so moving the
+bundle breaks it. Untick and retick to point it at the new location.
+
 `SMAppService.mainApp` registers the bundle itself, which needs no helper target and no plist of ours. macOS lets you veto login items in **System Settings › General › Login Items**, so the status can come back as *requires approval* — the checkbox says so rather than sitting ticked while nothing happens.
 
 ### Saying which project it was
