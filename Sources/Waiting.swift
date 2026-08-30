@@ -21,6 +21,7 @@ extension AppDelegate {
 
     func clearWaiting(_ sessionID: String) {
         try? FileManager.default.removeItem(at: waitingDir.appendingPathComponent(sessionID))
+        clearDeliveredNotifications(for: sessionID)
     }
 
     // Sweeps as it counts. A session whose transcript has moved on since the
@@ -42,7 +43,7 @@ extension AppDelegate {
             // Nothing is owed forever. A session left alone for longer than the
             // registry keeps it is not waiting, it is abandoned.
             guard Date().timeIntervalSince(markedAt) < liveStaleWindow else {
-                try? fm.removeItem(at: marker)
+                clearWaiting(sessionID)
                 continue
             }
 

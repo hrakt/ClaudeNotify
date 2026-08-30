@@ -161,6 +161,26 @@ A session killed outright, by closing the terminal or `kill -9`, never sends `Se
 
 Transcripts can reach tens of megabytes, so the app reads only the last 200KB of each rather than parsing the file. That keeps opening the menu at a few milliseconds instead of seconds.
 
+### Leaning on Notification Center rather than rebuilding it
+
+A list of what has finished was considered and dropped: macOS already keeps one,
+and it beats anything built here. It survives the app being quit, it persists
+across restarts, and it is one gesture away. A panel of our own would be a worse
+copy that only exists while the app runs.
+
+What that list needed was not replacing but tidying. Every banner used to arrive
+as its own card, so five real situations showed up as a column of twelve, most of
+them already dealt with. Two changes fix that without any new interface.
+
+Banners are threaded by session id, so Notification Center collapses repeats from
+one session into a single card with a count.
+
+And a session's cards are taken down once it has been dealt with, through the
+same door that clears the waiting mark: replying, going to it, or marking it
+seen. Delivered banners otherwise outlive the thing they announced and keep
+asserting something that is no longer true. This is also what keeps the number
+beside the bell and the list in Notification Center telling the same story.
+
 ### Counting what is waiting on you
 
 Muting has been this app's most used feature, by a distance, and a muted app says

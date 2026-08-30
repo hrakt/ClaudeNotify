@@ -18,6 +18,23 @@ extension AppDelegate {
         pendingWatcher = source
     }
 
+    // Delivered banners outlive the thing they announced. Once a session has been
+    // dealt with, its old cards are saying something that is no longer true, so
+    // they are taken down rather than left to accumulate. This is what keeps the
+    // count in the menu bar and the list in Notification Center telling the same
+    // story.
+    func clearDeliveredNotifications(for sessionID: String) {
+        guard !sessionID.isEmpty else { return }
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            let mine = delivered
+                .filter { $0.request.content.threadIdentifier == sessionID }
+                .map { $0.request.identifier }
+            guard !mine.isEmpty else { return }
+            center.removeDeliveredNotifications(withIdentifiers: mine)
+        }
+    }
+
     // The script reads this marker and falls back to its own plain banner, so a
     // refusal by macOS costs the click and the styling, never the notification.
     func recordNotificationPermission(_ granted: Bool) {
@@ -175,6 +192,11 @@ extension AppDelegate {
             content.subtitle = subtitle
             content.body = body
             content.userInfo = info.merging(["session": sessionID]) { current, _ in current }
+
+            // Grouped by session, so Notification Center collapses repeats into
+            // one card with a count instead of a column of near-identical ones.
+            // Twelve cards for five situations is a pile, not a list.
+            if !sessionID.isEmpty { content.threadIdentifier = sessionID }
             if let category { content.categoryIdentifier = category }
             if let icon, let image = self.attachment(icon) { content.attachments = [image] }
 
