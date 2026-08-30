@@ -65,6 +65,7 @@ extension AppDelegate {
             // avoided, and one summary afterwards says the same thing better.
             // Keyed by session id, so a session finishing twice is held once.
             if inMeeting {
+                markWaiting(sessionID)
                 try? fm.createDirectory(at: deferredDir, withIntermediateDirectories: true)
                 let held = deferredDir.appendingPathComponent(sessionID)
                 try? fm.removeItem(at: held)
@@ -74,6 +75,10 @@ extension AppDelegate {
 
             try? fm.removeItem(at: file)
             guard !stale else { continue }
+
+            // Recorded whether or not anything is audible: this is the half that
+            // still works while muted.
+            markWaiting(sessionID)
 
             // A Focus costs the sound and the announcement, not the banner:
             // macOS holds banners itself while one is on, and the ding is the

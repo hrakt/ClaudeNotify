@@ -136,6 +136,16 @@ func testLoginItemPreference() {
     check("login: statuses read differently", Set(described).count == described.count)
 }
 
+func testWaitingPaths() {
+    check("waiting: markers sit under the support directory",
+          waitingDir.deletingLastPathComponent().path == supportDir.path)
+    check("waiting: a reply is not mistaken for the turn that ended",
+          transcriptAnswerGrace > 0 && transcriptAnswerGrace < 10)
+    // Cleared by SessionEnd, so the hook has to know where they live.
+    check("hook: session end clears the waiting mark",
+          scriptBody.contains("claudenotify/waiting/$SESSION_ID"))
+}
+
 func testIconSet() {
     check("icons: every kind has a distinct name",
           Set(NotificationIcon.all.map { $0.name }).count == NotificationIcon.all.count)
@@ -162,6 +172,7 @@ testOrcaHandle()
 testJSONReading()
 testProjectToneAssignment()
 testLoginItemPreference()
+testWaitingPaths()
 testIconSet()
 
 if failures.isEmpty {

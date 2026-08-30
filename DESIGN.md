@@ -35,6 +35,7 @@ The app never touches your Claude Code settings. Instead, your Stop hook calls a
 ~/.claude/claudenotify/in-meeting  raised by the app while a meeting app holds the mic
 ~/.claude/claudenotify/quiet-in-meetings  0 disables meeting detection, absent or 1 enables it
 ~/.claude/claudenotify/force-meeting  create it to fake a meeting, delete it to end one
+~/.claude/claudenotify/waiting/    one file per session that finished and has not been answered
 ~/.claude/claudenotify/deferred/   banners held during a meeting, summarised when it ends
 ~/.claude/claudenotify/sound-attention  one line: sound for "Claude needs you", defaults to Submarine
 ~/.claude/claudenotify/pending/    banner handoff: script drops a session id, app posts it
@@ -159,6 +160,27 @@ A session killed outright, by closing the terminal or `kill -9`, never sends `Se
 **Titles lag slightly**, since `aiTitle` is only written once Claude has enough context to name the session.
 
 Transcripts can reach tens of megabytes, so the app reads only the last 200KB of each rather than parsing the file. That keeps opening the menu at a few milliseconds instead of seconds.
+
+### Counting what is waiting on you
+
+Muting has been this app's most used feature, by a distance, and a muted app says
+nothing at all. This is the half that survives the mute: a number beside the bell
+for how many sessions have finished and not been picked up again.
+
+A marker file is written when a turn finishes, whether or not anything was
+audible. It is removed when you reply, and the whole mechanism is the file's
+timestamp: a session stops waiting once its transcript has moved on past the
+mark. That covers replying through this app and the far more likely route of
+just typing into the terminal, without either having to tell the other.
+
+Three seconds of grace separate the two. The transcript is written as the turn
+ends, so its timestamp is a hair newer than the marker's, and without a window
+every session would clear itself instantly.
+
+Going to a session clears it immediately rather than waiting for the transcript,
+since clicking through is the clearest statement possible that you have seen it.
+SessionEnd clears it in the hook, and anything left for longer than the registry
+keeps a session is dropped: nothing is owed forever.
 
 ### A tone per project
 

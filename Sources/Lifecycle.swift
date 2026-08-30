@@ -90,6 +90,7 @@ extension AppDelegate {
         try? fm.createDirectory(at: pendingDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: pendingMetaDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: projectSoundsDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: waitingDir, withIntermediateDirectories: true)
 
         // If macOS no longer offers the ducking call, the preference is written
         // off rather than merely greyed out in Settings. The hook reads that
@@ -237,10 +238,17 @@ extension AppDelegate {
                 ? "In a meeting, holding notifications"
                 : "In a meeting, \(held) notification\(held == 1 ? "" : "s") held"
         }
+        // The count is the one thing that still says something while muted, so it
+        // is drawn next to the bell rather than hidden in the menu.
+        let waiting = waitingSessions().count
+        if waiting > 0 {
+            desc = "\(waiting) session\(waiting == 1 ? "" : "s") waiting on you. " + desc
+        }
+
         if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: desc) {
             img.isTemplate = true   // adapts to light/dark menu bar
             statusItem.button?.image = img
-            statusItem.button?.title = ""
+            statusItem.button?.title = waiting > 0 ? " \(waiting)" : ""
         } else {
             statusItem.button?.image = nil
             statusItem.button?.title = muted ? "🔕" : "🔔"

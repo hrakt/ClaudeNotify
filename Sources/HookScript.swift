@@ -41,7 +41,8 @@ if [ -n "$SESSION_ID" ]; then
     mkdir -p "$LIVE_DIR" 2>/dev/null
     if [ "$EVENT" = "SessionEnd" ]; then
         rm -f "$LIVE_DIR/$SESSION_ID" "$TTY_DIR/$SESSION_ID" \\
-            "$TERMINAL_DIR/$SESSION_ID"
+            "$TERMINAL_DIR/$SESSION_ID" \\
+            "$HOME/.claude/claudenotify/waiting/$SESSION_ID"
         exit 0
     fi
     printf '%s' "$CWD" > "$LIVE_DIR/$SESSION_ID" 2>/dev/null

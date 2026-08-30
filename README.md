@@ -8,6 +8,8 @@ Claude Code can run a hook when a turn ends. Point it at this app and you get a 
 
 **Tells your sessions apart.** Each project can get its own tone, so you know which one finished before you look. Clicking the banner opens the terminal tab it came from, including the exact tab in Orca.
 
+**Keeps a count while you are muted.** The bell shows how many sessions have finished and not been picked up again. Muting stops the noise; this is the part that still tells you something, glanceable without opening anything. A session stops counting the moment you reply to it or go to it.
+
 **Knows when to shut up.** It goes quiet while your microphone is live, so a chime never lands in the middle of a call. When the call ends you get one banner saying what finished while you were away, with a button to overrule it if the detection was wrong.
 
 **Stays out of the way of your music.** Rather than a ding loud enough to beat whatever you are playing, it dips the other audio for a second and chimes at a normal volume.

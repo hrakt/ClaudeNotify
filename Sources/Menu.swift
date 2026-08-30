@@ -80,6 +80,16 @@ extension AppDelegate {
             menu.addItem(status)
         }
 
+        let waiting = waitingSessions()
+        if !waiting.isEmpty {
+            let status = NSMenuItem(
+                title: "\(waiting.count) waiting on you",
+                action: nil, keyEquivalent: "")
+            status.isEnabled = false
+            menu.addItem(status)
+            menu.addItem(actionItem("Mark All as Seen", #selector(markAllSeen)))
+        }
+
         menu.addItem(.separator())
 
         let current = selectedSound.resolvingSymlinksInPath().path
@@ -272,9 +282,13 @@ extension AppDelegate {
             return menu
         }
 
+        let waiting = Set(waitingSessions())
         for session in sessions {
             let assigned = assignedSound(for: session.id)
-            var title = "\(session.project) · \(session.title)"
+            // Marked in the list too, so the count in the menu bar can be turned
+            // into "which ones" without opening every submenu.
+            var title = (waiting.contains(session.id) ? "• " : "")
+                + "\(session.project) · \(session.title)"
             if title.count > 58 { title = String(title.prefix(57)) + "…" }
 
             let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
@@ -454,6 +468,12 @@ extension AppDelegate {
     // The same jump the banner does, reachable from the menu. Useful on its own,
     // and it means the path can be exercised without waiting for a session to
     // finish something.
+    @objc func markAllSeen() {
+        for sessionID in waitingSessions() { clearWaiting(sessionID) }
+        rebuildMenu()
+        updateUI()
+    }
+
     @objc func goToSession(_ sender: NSMenuItem) {
         guard let sessionID = sender.representedObject as? String else { return }
         focusTerminal(for: sessionID)

@@ -120,6 +120,13 @@ let duckRamp: Float32 = 0.2
 // out of a call tells you what finished while you were in it.
 let deferredDir = supportDir.appendingPathComponent("deferred")
 
+// One file per session that has finished and not been answered.
+let waitingDir = supportDir.appendingPathComponent("waiting")
+
+// The transcript is written as the turn ends, so its timestamp is a hair newer
+// than the marker's. Anything inside this window is the same event, not a reply.
+let transcriptAnswerGrace: TimeInterval = 3
+
 // Matched as prefixes, since the process holding the microphone is usually a
 // helper: Chrome records as com.google.Chrome.helper, Slack as
 // com.tinyspeck.slackmacgap.helper.

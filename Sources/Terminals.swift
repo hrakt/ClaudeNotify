@@ -5,6 +5,12 @@ extension AppDelegate {
     // window that comes forward is already showing the right session rather than
     // visibly flipping to it afterwards.
     func focusTerminal(for sessionID: String) {
+        // Going to a session is the clearest possible statement that you have
+        // seen it, so it stops counting immediately rather than waiting for the
+        // transcript to move.
+        clearWaiting(sessionID)
+        defer { updateUI() }
+
         note("click for session \(sessionID.prefix(8)) -> "
             + "\(sessionTerminal(sessionID)?.program ?? "no record")")
 

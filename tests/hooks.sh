@@ -89,6 +89,8 @@ it "timed mute, still running";   reset; echo $(( $(date +%s) + 300 )) > "$SB/.c
 it "timed mute, expired";         reset; echo $(( $(date +%s) - 10 )) > "$SB/.claude/claudenotify/muted-until"; hook Stop; played; hasnt "muted-until"
 it "session start is silent";     reset; hook SessionStart; silent; has "live/$SID"; has "terminals/$SID"
 it "session end cleans up";       reset; hook SessionStart; hook SessionEnd; hasnt "live/$SID"; hasnt "terminals/$SID"
+it "session end clears the waiting mark"; reset; mkdir -p "$SB/.claude/claudenotify/waiting"; \
+    : > "$SB/.claude/claudenotify/waiting/$SID"; hook SessionEnd; hasnt "waiting/$SID"
 it "no session id still dings";   reset; hook Stop /Users/me/cam-fe NONE; played
 it "malformed session id dings";  reset; hook Stop /Users/me/cam-fe "not!valid"; played
 it "blocked on you sounds different"; reset; hook Notification; played_tone Submarine
