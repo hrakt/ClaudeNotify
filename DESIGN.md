@@ -161,6 +161,29 @@ A session killed outright, by closing the terminal or `kill -9`, never sends `Se
 
 Transcripts can reach tens of megabytes, so the app reads only the last 200KB of each rather than parsing the file. That keeps opening the menu at a few milliseconds instead of seconds.
 
+### Knowing what happened to a banner, and posting only one per session
+
+Two things macOS will tell you, but only if asked in the right way.
+
+**A dismissal is reportable, but not by default.** Clicking a banner has always
+arrived here; swiping one away did not, and was indistinguishable from ignoring
+it. macOS only reports a dismissal for notifications whose *category* was
+registered with `customDismissAction`, and the session banners had no category at
+all. They have one now. It carries no buttons; it exists purely to be told. A
+swipe is treated as having seen the session, the same as going to it, so it
+clears the waiting mark and takes the count down.
+
+**Repeats replace rather than stack.** A notification posted with an identifier
+that is already delivered *updates* that one instead of adding another. The
+identifier used to carry a timestamp, which guaranteed a new card every time; it
+is now the session id, so a session holds exactly one card showing its latest
+state however many turns it finishes. The banner still appears on each post, so
+nothing is missed. Only the pile is.
+
+Threading by session and reusing the identifier do different jobs and are both
+worth having: threading groups what is already there, and a stable identifier
+stops more from arriving.
+
 ### Leaning on Notification Center rather than rebuilding it
 
 A list of what has finished was considered and dropped: macOS already keeps one,

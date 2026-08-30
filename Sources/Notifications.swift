@@ -151,7 +151,9 @@ extension AppDelegate {
                 body: reminder.map { "\($0). \(destination)" } ?? destination,
                 fallbackSubtitle: resolved,
                 fallbackBody: reminder,
-                icon: needsYou ? .needsYou : .finished)
+                category: sessionCategoryID,
+                icon: needsYou ? .needsYou : .finished,
+                replacing: sessionID.isEmpty ? nil : sessionID)
     }
 
     func postSummaryNotification(sessionID: String, title: String, body: String) {
@@ -161,7 +163,9 @@ extension AppDelegate {
                 body: "Click to go to the most recent.",
                 fallbackSubtitle: body,
                 fallbackBody: title,
-                icon: .finished)
+                category: sessionCategoryID,
+                icon: .finished,
+                replacing: "meeting-summary")
     }
 
     // Every failure path ends in a visible banner. Permission can be refused at
@@ -175,7 +179,8 @@ extension AppDelegate {
                  fallbackBody: String?,
                  category: String? = nil,
                  info: [String: Any] = [:],
-                 icon: NotificationIcon? = nil) {
+                 icon: NotificationIcon? = nil,
+                 replacing identifier: String? = nil) {
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
             guard let self else { return }
 
@@ -200,8 +205,13 @@ extension AppDelegate {
             if let category { content.categoryIdentifier = category }
             if let icon, let image = self.attachment(icon) { content.attachments = [image] }
 
+            // Posting with an identifier that is already delivered UPDATES that
+            // notification rather than adding another. One card per session, always
+            // showing the latest, instead of a column that grows all afternoon.
+            // The banner still appears each time, so nothing is missed; only the
+            // pile is avoided.
             let request = UNNotificationRequest(
-                identifier: "\(sessionID)-\(Date().timeIntervalSince1970)",
+                identifier: identifier ?? "\(sessionID)-\(Date().timeIntervalSince1970)",
                 content: content,
                 trigger: nil)
 
@@ -236,6 +246,21 @@ extension AppDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        // Swiping a card away is a statement that you have seen it, so it counts
+        // the same as going to the session. macOS only reports this because the
+        // category asked to be told; without customDismissAction a dismissal is
+        // indistinguishable from ignoring the thing.
+        if response.actionIdentifier == UNNotificationDismissActionIdentifier {
+            if let session = response.notification.request.content.userInfo["session"] as? String,
+               !session.isEmpty {
+                note("dismissed \(session.prefix(8)), marking it seen")
+                clearWaiting(session)
+                updateUI()
+            }
+            completionHandler()
+            return
+        }
+
         // Both buttons are scoped to the meeting they were posted about, since a
         // delivered banner outlives it. Muting the app days later off a stale
         // notice is the same class of mistake as silencing the wrong call.

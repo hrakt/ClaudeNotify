@@ -184,7 +184,8 @@ extension AppDelegate {
                 fallbackBody: "Holding notifications. Quiet During Meetings in the menu overrides it",
                 category: meetingCategoryID,
                 info: ["meeting": meetingID],
-                icon: .meeting)
+                icon: .meeting,
+                replacing: "meeting-notice")
     }
 
     // Deliberately scoped to this meeting rather than to the setting. Someone
@@ -237,7 +238,8 @@ extension AppDelegate {
                 fallbackBody: "Your microphone is free again",
                 category: meetingEndedCategoryID,
                 info: ["meeting": meetingID],
-                icon: .resumed)
+                icon: .resumed,
+                replacing: "meeting-resumed")
     }
 
     // The inverse of Notify Anyway: the detection was right that you were busy

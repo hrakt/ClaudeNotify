@@ -146,6 +146,16 @@ func testWaitingPaths() {
           scriptBody.contains("claudenotify/waiting/$SESSION_ID"))
 }
 
+// Dismissal is only reported for categories that asked to be told, and one card
+// per session only happens if the identifier is reused. Both are easy to undo by
+// accident, and neither fails loudly.
+func testNotificationPlumbing() {
+    check("banners: session category exists to hear about dismissals",
+          !sessionCategoryID.isEmpty)
+    check("banners: the categories are all distinct",
+          Set([sessionCategoryID, meetingCategoryID, meetingEndedCategoryID]).count == 3)
+}
+
 func testIconSet() {
     check("icons: every kind has a distinct name",
           Set(NotificationIcon.all.map { $0.name }).count == NotificationIcon.all.count)
@@ -173,6 +183,7 @@ testJSONReading()
 testProjectToneAssignment()
 testLoginItemPreference()
 testWaitingPaths()
+testNotificationPlumbing()
 testIconSet()
 
 if failures.isEmpty {

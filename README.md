@@ -10,7 +10,7 @@ Claude Code can run a hook when a turn ends. Point it at this app and you get a 
 
 **Keeps a count while you are muted.** The bell shows how many sessions have finished and not been picked up again. Muting stops the noise; this is the part that still tells you something, glanceable without opening anything. A session stops counting the moment you reply to it or go to it.
 
-**Keeps its own history tidy.** Banners are grouped per session in Notification Center rather than stacking up, and a session's old cards are taken down once you have replied to it or gone to it.
+**Keeps its own history tidy.** One card per session, updated in place rather than stacking, and it comes down once you have replied, gone to it, or swiped it away.
 
 **Knows when to shut up.** It goes quiet while your microphone is live, so a chime never lands in the middle of a call. When the call ends you get one banner saying what finished while you were away, with a button to overrule it if the detection was wrong.
 

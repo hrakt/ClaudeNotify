@@ -32,20 +32,27 @@ extension AppDelegate {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         center.setNotificationCategories([
+            // customDismissAction is what makes a swipe reportable. It carries no
+            // buttons; it only asks macOS to say when the card went away.
+            UNNotificationCategory(
+                identifier: sessionCategoryID,
+                actions: [],
+                intentIdentifiers: [],
+                options: [.customDismissAction]),
             UNNotificationCategory(
                 identifier: meetingCategoryID,
                 actions: [UNNotificationAction(identifier: meetingOverrideActionID,
                                                title: "Notify Anyway",
                                                options: [])],
                 intentIdentifiers: [],
-                options: []),
+                options: [.customDismissAction]),
             UNNotificationCategory(
                 identifier: meetingEndedCategoryID,
                 actions: [UNNotificationAction(identifier: stayQuietActionID,
                                                title: "Stay Quiet",
                                                options: [])],
                 intentIdentifiers: [],
-                options: []),
+                options: [.customDismissAction]),
         ])
         center.requestAuthorization(options: [.alert]) { [weak self] granted, error in
             note("notification authorization granted=\(granted) error=\(error?.localizedDescription ?? "none")")

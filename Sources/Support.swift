@@ -156,6 +156,12 @@ let meetingApps: [(prefix: String, name: String)] = [
 
 // The notice carries a button, which means a registered category: an action on
 // a notification posted without one is silently dropped by macOS.
+// Session banners need a category of their own for one reason: macOS only tells
+// an app that a notification was dismissed if its category asked to be told.
+// Without this, swiping a banner away is silent and indistinguishable from
+// ignoring it.
+let sessionCategoryID = "session-finished"
+
 let meetingCategoryID = "meeting-detected"
 let meetingOverrideActionID = "meeting-notify-anyway"
 let meetingEndedCategoryID = "meeting-ended"
