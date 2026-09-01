@@ -161,6 +161,39 @@ A session killed outright, by closing the terminal or `kill -9`, never sends `Se
 
 Transcripts can reach tens of megabytes, so the app reads only the last 200KB of each rather than parsing the file. That keeps opening the menu at a few milliseconds instead of seconds.
 
+### Three lines, three jobs
+
+A banner used to read:
+
+```
+Claude finished
+cam-api: SMART-6334 Adverse ac…
+Click to switch to Warp.
+```
+
+The line macOS shows most prominently said the same thing on every card, the one
+piece of information you actually need was buried mid way through a truncated
+second line, and the third was an instruction repeated identically everywhere.
+
+It reads:
+
+```
+cam-api finished
+SMART-6334 Adverse action letters
+Open Warp · 2 others waiting
+```
+
+The project goes first because which one wants you is what you read first, and
+because the title line is the one macOS will not truncate. The session's own name
+follows. The last line says where the click goes and what is queued behind it,
+which is the same space spent on something that differs between cards.
+
+The project is taken back out of the session name where it appears, since the
+hook sends the two glued together and repeating it would waste the line.
+
+A **Go to it** button was added alongside. Clicking the banner has always worked,
+but only if you knew it would; a named button says so.
+
 ### Knowing what happened to a banner, and posting only one per session
 
 Two things macOS will tell you, but only if asked in the right way.

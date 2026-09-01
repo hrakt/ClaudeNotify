@@ -128,32 +128,70 @@ extension AppDelegate {
                                   label: String? = nil,
                                   reminder: String? = nil,
                                   needsYou: Bool = false) {
-        let resolved = (label?.isEmpty == false) ? label! : describeSession(sessionID)
+        // Three lines, each doing a different job. The first names the project,
+        // because which one wants you is the thing you read first and the only
+        // line macOS will not truncate. The second is what that session is
+        // actually doing. The third is what you can do about it.
+        //
+        // Before this the first line was the same on every card and the project
+        // was buried in the middle of a truncated second line.
+        let project = projectName(for: sessionID) ?? ""
+        let work = sessionTitle(for: sessionID)
+            ?? label.map { stripProject($0) }
+            ?? ""
 
-        // The body promises only what the click can deliver: an unknown
-        // terminal cannot be raised, so it is named rather than offered.
-        let destination: String
-        switch sessionTerminal(sessionID) {
-        case .none:
-            destination = "Click to switch to your terminal."
-        case .some(let record) where record.app == nil:
-            destination = "This session is in \(record.displayName)."
-        case .some(let record) where record.program == "Orca" && !record.handle.isEmpty:
-            destination = "Click to open this tab in \(record.displayName)."
-        case .some(let record):
-            destination = "Click to switch to \(record.displayName)."
+        let headline: String
+        if project.isEmpty {
+            headline = needsYou ? "Claude needs you" : "Claude finished"
+        } else {
+            headline = needsYou ? "\(project) needs you" : "\(project) finished"
         }
 
+        let resolved = work.isEmpty ? describeSession(sessionID) : work
+
         deliver(sessionID: sessionID,
-                title: needsYou ? "Claude needs you"
-                    : (reminder == nil ? "Claude finished" : "Claude still waiting"),
+                title: reminder == nil ? headline : "\(headline), still waiting",
                 subtitle: resolved,
-                body: reminder.map { "\($0). \(destination)" } ?? destination,
-                fallbackSubtitle: resolved,
+                body: actionLine(for: sessionID, reminder: reminder),
+                fallbackSubtitle: "\(headline) — \(resolved)",
                 fallbackBody: reminder,
                 category: sessionCategoryID,
                 icon: needsYou ? .needsYou : .finished,
                 replacing: sessionID.isEmpty ? nil : sessionID)
+    }
+
+    // The hook sends "project: title" as one string. When the transcript has not
+    // named the session yet that is all there is, so the project is taken off
+    // rather than repeated in both lines.
+    func stripProject(_ label: String) -> String {
+        for separator in [": ", " · "] where label.contains(separator) {
+            let parts = label.components(separatedBy: separator)
+            if parts.count > 1 { return parts.dropFirst().joined(separator: separator) }
+        }
+        return label
+    }
+
+    // The last line used to read "Click to switch to Warp" on every single card,
+    // which is instruction rather than information and identical everywhere. It
+    // says where the click goes and what else is queued behind this one.
+    func actionLine(for sessionID: String, reminder: String?) -> String {
+        var parts: [String] = []
+        if let reminder { parts.append(reminder) }
+
+        switch sessionTerminal(sessionID) {
+        case .some(let record) where record.program == "Orca" && !record.handle.isEmpty:
+            parts.append("Open its tab in Orca")
+        case .some(let record) where record.app != nil:
+            parts.append("Open \(record.displayName)")
+        case .some(let record):
+            parts.append("In \(record.displayName)")
+        case .none:
+            parts.append("Open your terminal")
+        }
+
+        let others = waitingSessions().filter { $0 != sessionID }.count
+        if others > 0 { parts.append("\(others) other\(others == 1 ? "" : "s") waiting") }
+        return parts.joined(separator: " · ")
     }
 
     func postSummaryNotification(sessionID: String, title: String, body: String) {
@@ -265,6 +303,15 @@ extension AppDelegate {
         // delivered banner outlives it. Muting the app days later off a stale
         // notice is the same class of mistake as silencing the wrong call.
         let announced = response.notification.request.content.userInfo["meeting"] as? Int
+
+        if response.actionIdentifier == goToSessionActionID {
+            if let session = response.notification.request.content.userInfo["session"] as? String,
+               !session.isEmpty {
+                focusTerminal(for: session)
+            }
+            completionHandler()
+            return
+        }
 
         if response.actionIdentifier == stayQuietActionID {
             if announced == meetingID { stayQuiet() }

@@ -152,8 +152,24 @@ func testWaitingPaths() {
 func testNotificationPlumbing() {
     check("banners: session category exists to hear about dismissals",
           !sessionCategoryID.isEmpty)
+    check("banners: the go-to action is distinct from the dismiss ones",
+          Set([goToSessionActionID, stayQuietActionID, meetingOverrideActionID]).count == 3)
     check("banners: the categories are all distinct",
           Set([sessionCategoryID, meetingCategoryID, meetingEndedCategoryID]).count == 3)
+}
+
+// The project has to come out of the label when the transcript has not named
+// the session yet, or it appears in both the title and the line beneath it.
+func testLabelSplitting() {
+    let app = AppDelegate()
+    check("label: strips a hook style project prefix",
+          app.stripProject("cam-fe: SMART-6479 deployment"), "SMART-6479 deployment")
+    check("label: strips the app style separator",
+          app.stripProject("cam-fe · SMART-6479 deployment"), "SMART-6479 deployment")
+    check("label: leaves a bare title alone",
+          app.stripProject("SMART-6479 deployment"), "SMART-6479 deployment")
+    check("label: keeps colons inside the title",
+          app.stripProject("cam-fe: fix: the parser"), "fix: the parser")
 }
 
 func testIconSet() {
@@ -184,6 +200,7 @@ testProjectToneAssignment()
 testLoginItemPreference()
 testWaitingPaths()
 testNotificationPlumbing()
+testLabelSplitting()
 testIconSet()
 
 if failures.isEmpty {

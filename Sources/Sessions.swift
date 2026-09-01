@@ -1,6 +1,15 @@
 import Cocoa
 
 extension AppDelegate {
+    // Just the name Claude gave the work, with no project glued to the front.
+    // The project belongs in the notification's title where it cannot be
+    // truncated, so the two are wanted separately rather than as one string.
+    func sessionTitle(for sessionID: String) -> String? {
+        guard let transcript = transcriptURL(for: sessionID) else { return nil }
+        let title = lastJSONValue("aiTitle", in: tailText(of: transcript) ?? "")
+        return (title?.isEmpty == false) ? title : nil
+    }
+
     func describeSession(_ sessionID: String) -> String {
         let cwd = (try? String(contentsOf: liveDir.appendingPathComponent(sessionID), encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines)

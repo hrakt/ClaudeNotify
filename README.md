@@ -6,6 +6,8 @@ Claude Code can run a hook when a turn ends. Point it at this app and you get a 
 
 ## What it does
 
+**Says which session, first.** The banner leads with the project, names the work underneath, and ends with where the click goes and how many others are queued. A **Go to it** button takes you back to that exact tab.
+
 **Tells your sessions apart.** Each project can get its own tone, so you know which one finished before you look. Clicking the banner opens the terminal tab it came from, including the exact tab in Orca.
 
 **Keeps a count while you are muted.** The bell shows how many sessions have finished and not been picked up again. Muting stops the noise; this is the part that still tells you something, glanceable without opening anything. A session stops counting the moment you reply to it or go to it.

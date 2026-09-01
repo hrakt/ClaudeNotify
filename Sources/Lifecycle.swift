@@ -36,7 +36,11 @@ extension AppDelegate {
             // buttons; it only asks macOS to say when the card went away.
             UNNotificationCategory(
                 identifier: sessionCategoryID,
-                actions: [],
+                // Clicking the banner has always worked, but only if you knew
+                // it would. A named button says so, and says where it goes.
+                actions: [UNNotificationAction(identifier: goToSessionActionID,
+                                               title: "Go to it",
+                                               options: [.foreground])],
                 intentIdentifiers: [],
                 options: [.customDismissAction]),
             UNNotificationCategory(

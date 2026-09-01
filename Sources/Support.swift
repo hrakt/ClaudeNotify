@@ -161,6 +161,7 @@ let meetingApps: [(prefix: String, name: String)] = [
 // Without this, swiping a banner away is silent and indistinguishable from
 // ignoring it.
 let sessionCategoryID = "session-finished"
+let goToSessionActionID = "session-go-to"
 
 let meetingCategoryID = "meeting-detected"
 let meetingOverrideActionID = "meeting-notify-anyway"
