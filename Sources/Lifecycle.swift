@@ -6,7 +6,7 @@ extension AppDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         installSupportFiles()
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: menuBarItemWidth)
         mainMenu.delegate = self
 
         if let button = statusItem.button {
@@ -191,6 +191,38 @@ extension AppDelegate {
         }
     }
 
+    // One canvas, always the same size, whatever it has to show. Drawn as a
+    // template so macOS tints it for a light or dark menu bar and for the
+    // highlighted state when the menu is open.
+    func menuBarImage(symbol: String, count: Int) -> NSImage {
+        let size = NSSize(width: menuBarItemWidth, height: menuBarItemHeight)
+        let image = NSImage(size: size, flipped: false) { _ in
+            let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+            if let glyph = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+                .withSymbolConfiguration(config) {
+                // Pinned left rather than centred, so the bell itself does not
+                // hop sideways when the count comes and goes.
+                let box = NSRect(x: 0,
+                                 y: (size.height - glyph.size.height) / 2,
+                                 width: glyph.size.width,
+                                 height: glyph.size.height)
+                glyph.draw(in: box)
+            }
+
+            guard count > 0 else { return true }
+            let text = NSAttributedString(string: "\(count)", attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: NSColor.black,
+            ])
+            let bounds = text.size()
+            text.draw(at: NSPoint(x: size.width - bounds.width - 1,
+                                  y: (size.height - bounds.height) / 2))
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
     func presentError(_ message: String, _ detail: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -256,14 +288,15 @@ extension AppDelegate {
             desc = "\(waiting) session\(waiting == 1 ? "" : "s") waiting on you. " + desc
         }
 
-        if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: desc) {
-            img.isTemplate = true   // adapts to light/dark menu bar
-            statusItem.button?.image = img
-            statusItem.button?.title = waiting > 0 ? " \(waiting)" : ""
-        } else {
-            statusItem.button?.image = nil
-            statusItem.button?.title = muted ? "🔕" : "🔔"
-        }
+        // Bell and count are composed into one image of a fixed size rather than
+        // set as separate image and title. Two variable pieces in a variable
+        // width item is what made the whole menu bar shuffle every time this
+        // changed state.
+        let icon = menuBarImage(symbol: symbol, count: waiting)
+        icon.accessibilityDescription = desc
+        statusItem.button?.image = icon
+        statusItem.button?.title = ""
+
         toggleItem?.state = muted ? .on : .off
         statusItem.button?.toolTip = "\(desc)\nClick to toggle, right-click for sounds and settings"
     }

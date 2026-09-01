@@ -172,6 +172,25 @@ func testLabelSplitting() {
           app.stripProject("cam-fe: fix: the parser"), "fix: the parser")
 }
 
+// The whole point of composing the menu bar icon by hand: every state has to
+// come out the same size, or the item resizes and shoves every icon to its left
+// along with it.
+func testMenuBarWidthIsConstant() {
+    let app = AppDelegate()
+    let states: [(String, Int)] = [
+        ("bell.fill", 0), ("bell.slash.fill", 0), ("bell.badge.slash.fill", 0),
+        ("bell.fill", 1), ("bell.fill", 9), ("bell.fill", 42),
+    ]
+    let sizes = Set(states.map { app.menuBarImage(symbol: $0.0, count: $0.1).size.width })
+    check("menu bar: one width for every state", sizes.count == 1)
+    check("menu bar: that width is the declared one",
+          sizes.first == menuBarItemWidth)
+    check("menu bar: an unknown symbol still yields the same size",
+          app.menuBarImage(symbol: "not.a.symbol", count: 0).size.width == menuBarItemWidth)
+    check("menu bar: drawn as a template so it tints itself",
+          app.menuBarImage(symbol: "bell.fill", count: 0).isTemplate)
+}
+
 func testIconSet() {
     check("icons: every kind has a distinct name",
           Set(NotificationIcon.all.map { $0.name }).count == NotificationIcon.all.count)
@@ -182,6 +201,42 @@ func testIconSet() {
 }
 
 // MARK: - entry
+
+// Renders the menu bar states so they can be looked at. Composed images are
+// easy to get subtly wrong in ways no assertion catches: a clipped bell, a
+// count sitting on top of it.
+if let index = CommandLine.arguments.firstIndex(of: "--emit-menubar"),
+   CommandLine.arguments.count > index + 1 {
+    let app = AppDelegate()
+    let states: [(String, Int)] = [
+        ("bell.fill", 0), ("bell.slash.fill", 0), ("bell.badge.slash.fill", 0),
+        ("bell.fill", 3), ("bell.slash.fill", 3), ("bell.fill", 12),
+    ]
+    let scale: CGFloat = 4, gap: CGFloat = 8
+    let cell = menuBarItemWidth * scale
+    let width = (cell + gap) * CGFloat(states.count) + gap
+    let height = menuBarItemHeight * scale + gap * 2
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(width), pixelsHigh: Int(height),
+        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSColor(white: 0.93, alpha: 1).setFill()
+    NSRect(x: 0, y: 0, width: width, height: height).fill()
+    for (i, state) in states.enumerated() {
+        let image = app.menuBarImage(symbol: state.0, count: state.1)
+        let box = NSRect(x: gap + (cell + gap) * CGFloat(i), y: gap,
+                         width: cell, height: menuBarItemHeight * scale)
+        // a template image draws black, which is what a light menu bar shows
+        NSColor.white.setFill()
+        box.fill()
+        image.draw(in: box)
+    }
+    NSGraphicsContext.restoreGraphicsState()
+    try! rep.representation(using: .png, properties: [:])!
+        .write(to: URL(fileURLWithPath: CommandLine.arguments[index + 1]))
+    exit(0)
+}
 
 if let index = CommandLine.arguments.firstIndex(of: "--emit-hook"),
    CommandLine.arguments.count > index + 1 {
@@ -201,6 +256,7 @@ testLoginItemPreference()
 testWaitingPaths()
 testNotificationPlumbing()
 testLabelSplitting()
+testMenuBarWidthIsConstant()
 testIconSet()
 
 if failures.isEmpty {

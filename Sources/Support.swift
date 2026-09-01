@@ -89,6 +89,14 @@ let focusAssertionsURL = FileManager.default.homeDirectoryForCurrentUser
 let openAtLoginURL = supportDir.appendingPathComponent("open-at-login")
 let respectFocusURL = supportDir.appendingPathComponent("respect-focus")
 let inFocusURL = supportDir.appendingPathComponent("in-focus")
+// The status item is a fixed width so nothing to its left ever moves. All three
+// bell symbols happen to be the same width, so the culprit was the count
+// appearing and disappearing beside them; with a variable length item that
+// shunts every other menu bar icon sideways. Wide enough for the bell plus two
+// digits, which is more sessions than anyone watches at once.
+let menuBarItemWidth: CGFloat = 34
+let menuBarItemHeight: CGFloat = 18
+
 // Drawn at launch, one per kind of banner.
 let iconsDir = supportDir.appendingPathComponent("icons")
 let notificationsBlockedURL = supportDir.appendingPathComponent("notifications-blocked")

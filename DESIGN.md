@@ -161,6 +161,27 @@ A session killed outright, by closing the terminal or `kill -9`, never sends `Se
 
 Transcripts can reach tens of megabytes, so the app reads only the last 200KB of each rather than parsing the file. That keeps opening the menu at a few milliseconds instead of seconds.
 
+### A menu bar item that does not move
+
+Changing state used to shove every icon to the left of this one sideways. The
+bell was the obvious suspect and was innocent: `bell.fill`, `bell.slash.fill` and
+`bell.badge.slash.fill` are all exactly 18 points wide. The culprit was the
+count, set as the button's title, appearing and disappearing beside it while the
+item was `variableLength`.
+
+The item is a fixed width now, and the bell and the count are composed into a
+single image of a fixed size rather than being an image plus a title. Two
+variable pieces inside a variable width item was the actual shape of the bug.
+
+The bell is pinned to the left of that canvas rather than centred, so it does not
+hop sideways when a count arrives. The cost is a little empty space when nothing
+is waiting, which is the right trade against every other icon in the menu bar
+moving.
+
+A test renders all six states and asserts they come out one width. `./build/tests
+--emit-menubar out.png` draws them to look at, because a composed image can be
+clipped or overlapping in ways no assertion notices.
+
 ### Three lines, three jobs
 
 A banner used to read:
